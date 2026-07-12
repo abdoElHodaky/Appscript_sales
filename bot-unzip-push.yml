@@ -1,0 +1,159 @@
+name: Bot - Unzip & Push to Repo
+
+on:
+  push:
+    paths:
+      - '**.zip'
+  workflow_dispatch:
+    inputs:
+      zip_file:
+        description: 'ZIP file name to unzip'
+        required: true
+        default: 'sales-order-system.zip'
+
+jobs:
+  unzip-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    # Step 1: Checkout with bot token
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.BOT_TOKEN || secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+
+    # Step 2: Configure Git Bot
+    - name: Configure Git Bot
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+    # Step 3: Detect ZIP file
+    - name: Detect ZIP file
+      id: detect
+      run: |
+        if [ "${{ github.event.inputs.zip_file }}" != "" ]; then
+          ZIP="${{ github.event.inputs.zip_file }}"
+        elif [ -f "sales-order-system.zip" ]; then
+          ZIP="sales-order-system.zip"
+        else
+          ZIP=$(ls *.zip 2>/dev/null | head -1)
+        fi
+
+        if [ -z "$ZIP" ] || [ ! -f "$ZIP" ]; then
+          echo "No ZIP file found"
+          echo "zip_found=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        echo "zip_found=true" >> $GITHUB_OUTPUT
+        echo "zip_name=$ZIP" >> $GITHUB_OUTPUT
+        echo "Found ZIP: $ZIP"
+
+    # Step 4: Unzip files
+    - name: Unzip project files
+      if: steps.detect.outputs.zip_found == 'true'
+      run: |
+        ZIP="${{ steps.detect.outputs.zip_name }}"
+        echo "📦 Unzipping: $ZIP"
+
+        # Create temp directory
+        mkdir -p .unzip-temp
+
+        # Unzip to temp
+        unzip -o "$ZIP" -d .unzip-temp/
+
+        echo "Extracted contents:"
+        find .unzip-temp -type f | head -20
+
+    # Step 5: Move files to repo root
+    - name: Move unzipped files
+      if: steps.detect.outputs.zip_found == 'true'
+      run: |
+        echo "📁 Moving files to repository..."
+
+        # If unzipped has a single root folder, move contents up
+        if [ $(ls -1 .unzip-temp/ | wc -l) -eq 1 ]; then
+          SUBDIR=$(ls -1 .unzip-temp/ | head -1)
+          if [ -d ".unzip-temp/$SUBDIR" ]; then
+            mv .unzip-temp/$SUBDIR/* . 2>/dev/null || true
+            mv .unzip-temp/$SUBDIR/.* . 2>/dev/null || true
+          fi
+        else
+          mv .unzip-temp/* . 2>/dev/null || true
+        fi
+
+        # Clean up temp
+        rm -rf .unzip-temp
+
+        echo "Repository structure after unzip:"
+        ls -la
+
+    # Step 6: Remove ZIP after extraction (optional)
+    - name: Remove ZIP file
+      if: steps.detect.outputs.zip_found == 'true'
+      run: |
+        ZIP="${{ steps.detect.outputs.zip_name }}"
+        echo "🗑️ Removing ZIP: $ZIP"
+        rm -f "$ZIP"
+
+    # Step 7: Commit and push unzipped files
+    - name: Commit unzipped files
+      if: steps.detect.outputs.zip_found == 'true'
+      run: |
+        git add -A
+
+        # Check if there are changes
+        if git diff --cached --quiet; then
+          echo "No changes to commit"
+          exit 0
+        fi
+
+        ZIP="${{ steps.detect.outputs.zip_name }}"
+        git commit -m "🤖 Bot: Unzip $ZIP and push extracted files
+
+        Extracted by: github-actions[bot]
+        Workflow: unzip-and-push.yml
+
+        Changes:
+        - Unzipped: $ZIP
+        - Removed: $ZIP (extracted)
+        - Added: Extracted project files"
+
+        echo "🚀 Pushing to repository..."
+        git push origin ${{ github.ref_name }}
+
+    # Step 8: Create PR if on non-main branch
+    - name: Create Pull Request
+      if: steps.detect.outputs.zip_found == 'true' && github.ref_name != 'main'
+      uses: peter-evans/create-pull-request@v6
+      with:
+        token: ${{ secrets.BOT_TOKEN || secrets.GITHUB_TOKEN }}
+        title: '🤖 Bot: Unzipped files from ${{ steps.detect.outputs.zip_name }}'
+        body: |
+          This PR was automatically created by the Unzip Bot.
+
+          **Changes:**
+          - Unzipped: `${{ steps.detect.outputs.zip_name }}`
+          - Extracted project files to repository root
+
+          Please review before merging.
+        branch: bot/unzip-${{ github.run_id }}
+        base: main
+
+    # Step 9: Summary
+    - name: Workflow Summary
+      if: steps.detect.outputs.zip_found == 'true'
+      run: |
+        echo "## 🤖 Unzip Bot Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| ZIP File | ${{ steps.detect.outputs.zip_name }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Branch | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Status | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Files have been extracted and pushed to the repository." >> $GITHUB_STEP_SUMMARY
