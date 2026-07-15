@@ -95,11 +95,11 @@ jobs:
         rm -f "$ZIP"
 
     # Step 6: Configure Git (required for push action)
-    - name: Configure Git
-      if: steps.detect.outputs.zip_found == 'true'
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
+    #- name: Configure Git
+    #  if: steps.detect.outputs.zip_found == 'true'
+    #  run: |
+      #  git config user.name "github-actions[bot]"
+      #  git config user.email "github-actions[bot]@users.noreply.github.com"
 
     # Step 7: Stage all changes
     - name: Stage changes
@@ -125,7 +125,7 @@ jobs:
     # Step 9: Push using ad-m/github-push-action (OPTIMIZED)
     - name: Push to repository
       if: steps.detect.outputs.zip_found == 'true'
-      uses: ad-m/github-push-action@d91bbf09584604938386cdfff637c219f8f6c7d0  # v0.8.0
+      uses: ad-m/github-push-action@master  # v0.8.0
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         branch: ${{ github.ref_name }}
