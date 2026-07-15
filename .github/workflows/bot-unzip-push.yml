@@ -95,11 +95,11 @@ jobs:
         rm -f "$ZIP"
 
     # Step 6: Configure Git (required for push action)
-    #- name: Configure Git
-    #  if: steps.detect.outputs.zip_found == 'true'
-    #  run: |
-      #  git config user.name "github-actions[bot]"
-      #  git config user.email "github-actions[bot]@users.noreply.github.com"
+    - name: Configure Git
+      if: steps.detect.outputs.zip_found == 'true'
+      run: |
+        git config user.name "abdoElHodaky"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
 
     # Step 7: Stage all changes
     - name: Stage changes
