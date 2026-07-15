@@ -1,0 +1,18 @@
+{
+  "scriptId": "YOUR_SCRIPT_ID",
+  "rootDir": "./src",
+  "projectId": "YOUR_GCP_PROJECT_ID",
+  "scriptExtensions": [".gs", ".js"],
+  "htmlExtensions": [".html"],
+  "filePushOrder": [
+    "src/utils/config.gs",
+    "src/utils/validators.gs",
+    "src/utils/security.gs",
+    "src/utils/logger.gs",
+    "src/services/inventory.gs",
+    "src/services/notifications.gs",
+    "src/triggers/onEdit.gs",
+    "src/triggers/timeDriven.gs",
+    "src/web/webApp.gs"
+  ]
+}

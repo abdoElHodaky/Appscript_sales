@@ -1,0 +1,66 @@
+name: Bot - PR Review & Unzip Check
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - '**.zip'
+
+jobs:
+  review-zip:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+    - name: Checkout PR
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332  # v4.1.7
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+
+    - name: Analyze ZIP in PR
+      id: analyze
+      run: |
+        ZIP=$(git diff --name-only origin/${{ github.base_ref }} | grep '\.zip$' | head -1)
+
+        if [ -z "$ZIP" ]; then
+          echo "zip_found=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        echo "zip_found=true" >> $GITHUB_OUTPUT
+        echo "zip_name=$ZIP" >> $GITHUB_OUTPUT
+
+        # Analyze ZIP contents
+        echo "📦 Analyzing: $ZIP"
+        echo "Size: $(du -h $ZIP | cut -f1)"
+        echo "Files:"
+        unzip -l $ZIP | tail -5
+
+    - name: Comment on PR
+      if: steps.analyze.outputs.zip_found == 'true'
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799c59a  # v7.0.1
+      with:
+        script: |
+          const zipName = '${{ steps.analyze.outputs.zip_name }}';
+          const body = `## 🤖 ZIP Bot Review
+
+          **Detected ZIP file:** \`${zipName}\`
+
+          This PR contains a ZIP file. The Unzip Bot will:
+          1. Extract contents after merge
+          2. Remove the ZIP file
+          3. Commit extracted files automatically
+
+          **Recommendation:** Consider extracting the ZIP before merging for easier review.
+
+          ---
+          *This comment was generated automatically by the ZIP Review Bot.*`;
+
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: body
+          });

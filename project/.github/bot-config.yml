@@ -1,0 +1,32 @@
+# Bot Configuration
+# إعدادات البوت
+
+bot:
+  name: "sales-system-bot"
+  email: "github-actions[bot]@users.noreply.github.com"
+
+unzip:
+  # Automatically remove ZIP after extraction
+  remove_zip: true
+
+  # Create PR for non-main branches
+  create_pr: true
+
+  # Commit message template
+  commit_template: |
+    🤖 Bot: Unzip {zip_name}
+
+    Extracted by: {bot_name}
+    Workflow: {workflow}
+
+    Changes:
+    - Unzipped: {zip_name}
+    - Removed: {zip_name}
+    - Added: Extracted files
+
+review:
+  # Comment on PRs with ZIP files
+  comment_on_pr: true
+
+  # Check for secrets in ZIP
+  secret_check: true

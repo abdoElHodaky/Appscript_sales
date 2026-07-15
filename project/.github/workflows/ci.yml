@@ -1,0 +1,57 @@
+name: CI / Tests & Unzip
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332  # v4.1.7
+
+    - name: Setup Node.js
+      uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee0682c27e  # v4.0.3
+      with:
+        node-version: '22'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm install
+
+    # Unzip if ZIP exists
+    - name: Unzip project
+      run: |
+        if [ -f "sales-order-system.zip" ]; then
+          unzip -o sales-order-system.zip
+        fi
+
+    - name: Run linter
+      run: npm run lint
+
+    - name: Run tests
+      run: npm test
+
+    - name: Check for secrets
+      uses: trufflesecurity/trufflehog@7e78ca385fb04b17b4cf4c2155c40da395c02458  # v3.81.2
+      with:
+        path: ./
+        base: main
+        head: HEAD
+        extra_args: --debug --only-verified
+
+    # Verify structure after unzip
+    - name: Verify project structure
+      run: |
+        echo "Project structure:"
+        ls -la
+        if [ -d "src" ]; then
+          echo "src/ directory exists"
+          ls -la src/
+        fi
+        if [ -f "appsscript.json" ]; then
+          echo "appsscript.json exists"
+        fi

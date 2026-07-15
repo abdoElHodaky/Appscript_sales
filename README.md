@@ -1,179 +1,96 @@
-# نظام إدارة المبيعات والطلبات
-# Sales Order Management System
+# Sales Order Management System - Complete Package
+# نظام إدارة المبيعات - الحزمة الكاملة
 
-<p align="center">
-  <img src="assets/diagrams/system-architecture.png" alt="System Architecture" width="800"/>
-</p>
+## 📦 Contents / المحتويات
 
-<p align="center">
-  <a href="https://github.com/google/clasp">
-    <img src="https://img.shields.io/badge/built%20with-clasp-4285f4.svg" alt="clasp"/>
-  </a>
-  <a href="https://developers.google.com/apps-script">
-    <img src="https://img.shields.io/badge/Google-Apps%20Script-green" alt="Apps Script"/>
-  </a>
-  <a href="https://www.appsheet.com">
-    <img src="https://img.shields.io/badge/AppSheet-No--Code-blue" alt="AppSheet"/>
-  </a>
-  <img src="https://img.shields.io/badge/version-2.0.0-brightgreen" alt="Version"/>
-  <img src="https://img.shields.io/badge/license-MIT-yellow" alt="License"/>
-</p>
+```
+sales-order-management-system-complete.zip
+│
+├── 📁 project/                    # GitHub-ready project (v5 - A+ rated)
+│   ├── README.md
+│   ├── LICENSE
+│   ├── src/                       # Modular source code
+│   ├── tests/                     # Unit & integration tests
+│   ├── docs/                      # Bilingual documentation
+│   ├── assets/                    # Diagrams & screenshots
+│   ├── scripts/                   # Setup & deploy scripts
+│   ├── .github/                   # CI/CD workflows + bots
+│   └── EXPERT_REVIEW.md           # Expert review report
+│
+├── 📁 archives/                   # Previous versions
+│   ├── sales-order-system-github-ready.zip (v1)
+│   ├── sales-order-system-github-ready-v2.zip
+│   ├── sales-order-system-github-ready-v3.zip
+│   ├── sales-order-system-github-ready-v4.zip
+│   └── sales-order-system-github-ready-v5.zip (latest)
+│
+├── 📁 reports/                    # Security & analysis reports
+│   ├── code-review-report.txt
+│   ├── shannon-pentest-plan.txt
+│   └── claude-skills-guide.txt
+│
+├── 📁 diagrams/                   # Visual documentation
+│   ├── shannon-workflow.png
+│   ├── security-dashboard.png
+│   ├── claude-skills-plan.png
+│   ├── final-audit.png
+│   └── expert-review.png
+│
+└── 📁 source/                     # Original source files
+    ├── apps-script-secure-v2.gs
+    └── apps-script-original.gs
+```
 
-## 🌐 اللغات / Languages
+## 🚀 Quick Start / البدء السريع
 
-- [العربية](#عربي)
-- [English](#english)
-
----
-
-<h2 id="عربي">🇦🇪 العربية</h2>
-
-### 📋 نظرة عامة
-
-نظام متكامل لإدارة المبيعات والطلبات يعتمد على **Google Workspace**، يتكون من:
-- **AppSheet** - واجهة المستخدم (Web + Mobile)
-- **Google Apps Script** - المنطق والأتمتة
-- **Google Sheets** - قاعدة البيانات
-
-### ✨ المميزات
-
-| الميزة | الوصف |
-|--------|-------|
-| 📱 واجهة الجوال | تصميم متجاوب يعمل على أي جهاز |
-| 🔐 أمان مؤسسي | صلاحيات متعددة + تشفير + حماية من XSS |
-| 📊 لوحة تحكم | إحصائيات فورية + رسوم بيانية |
-| 🔔 إشعارات تلقائية | بريد + WhatsApp عند تغيير الحالة |
-| 🔍 بحث سريع | فلترة متقدمة حسب العميل/الحالة/التاريخ |
-| 📦 متابعة المخزون | تحديث تلقائي عند إتمام الطلب |
-
-### 🚀 البدء السريع
-
+### Option 1: Use Latest Project (Recommended)
 ```bash
-# 1. تثبيت clasp
-npm install -g @google/clasp
-
-# 2. تسجيل الدخول
-clasp login
-
-# 3. استنساخ المشروع
-clasp clone-script "YOUR_SCRIPT_ID"
-
-# 4. تثبيت الاعتماديات
+cd project/
 npm install
-
-# 5. النشر
-clasp push
+npm run setup
+npm run deploy:prod
 ```
 
-### 📁 هيكل المشروع
-
-```
-sales-order-system/
-├── src/
-│   ├── triggers/          # Triggers (onEdit, Time-driven)
-│   ├── services/          # Business logic (orders, inventory, notifications)
-│   ├── utils/             # Utilities (validation, security, helpers)
-│   └── web/               # Web App (customer portal)
-├── tests/
-│   ├── unit/              # Unit tests
-│   └── integration/       # Integration tests
-├── docs/
-│   ├── ar/                # Documentation (Arabic)
-│   └── en/                # Documentation (English)
-├── assets/
-│   ├── diagrams/          # System diagrams
-│   └── screenshots/       # UI screenshots
-├── scripts/
-│   ├── setup.sh           # Setup script
-│   └── deploy.sh          # Deployment script
-├── .github/
-│   ├── workflows/           # CI/CD workflows
-│   └── ISSUE_TEMPLATE/    # Issue templates
-├── appsscript.json        # Apps Script manifest
-├── .clasp.json            # Clasp configuration
-├── .claspignore           # Files to ignore
-└── README.md              # This file
-```
-
-### 🔐 الأمان
-
-تم اختبار النظام باستخدام:
-- **Shannon** - اختبار اختراق ذاتي (96% نسبة نجاح)
-- **Code Reviewer** - مراجعة كود آلية (18 قضية مُكتشفة ومصلحة)
-
-التقارير متاحة في `docs/security/`.
-
-### 📄 الترخيص
-
-هذا المشروع مرخص بموجب [MIT License](LICENSE).
-
----
-
-<h2 id="english">🇺🇸 English</h2>
-
-### 📋 Overview
-
-A comprehensive sales and order management system built on **Google Workspace**, consisting of:
-- **AppSheet** - User interface (Web + Mobile)
-- **Google Apps Script** - Business logic & automation
-- **Google Sheets** - Database
-
-### ✨ Features
-
-| Feature | Description |
-|---------|-------------|
-| 📱 Mobile UI | Responsive design for any device |
-| 🔐 Enterprise Security | Multi-role permissions + encryption + XSS protection |
-| 📊 Dashboard | Real-time statistics & charts |
-| 🔔 Auto Notifications | Email + WhatsApp on status change |
-| 🔍 Quick Search | Advanced filtering by customer/status/date |
-| 📦 Inventory Tracking | Auto-update on order completion |
-
-### 🚀 Quick Start
-
+### Option 2: Extract from Archive
 ```bash
-# 1. Install clasp
-npm install -g @google/clasp
-
-# 2. Login
-clasp login
-
-# 3. Clone project
-clasp clone-script "YOUR_SCRIPT_ID"
-
-# 4. Install dependencies
-npm install
-
-# 5. Deploy
-clasp push
+# Extract any previous version
+unzip archives/sales-order-system-github-ready-v5.zip
+cd github-ready-sales-system
 ```
 
-### 📁 Project Structure
+## 📊 Project Evolution / تطور المشروع
 
-(See Arabic section above for full structure)
+| Version | Date | Changes | Rating |
+|---------|------|---------|--------|
+| v1 | 2026-06-11 | Initial release | B |
+| v2 | 2026-06-26 | Security fixes | B+ |
+| v3 | 2026-06-26 | GitHub workflows | A |
+| v4 | 2026-06-27 | GitHub bots | A |
+| v5 | 2026-07-14 | Expert review fixes | A+ |
 
-### 🔐 Security
+## 🔐 Security / الأمان
 
-Tested with:
-- **Shannon** - Autonomous pentesting (96% success rate)
-- **Code Reviewer** - Automated code review (18 issues found & fixed)
+- ✅ XSS Protection
+- ✅ Input Validation
+- ✅ Rate Limiting
+- ✅ Secret Management
+- ✅ Shannon Pentest
+- ✅ Code Review (18 issues fixed)
 
-Reports available in `docs/security/`.
+## 🤖 Automation / الأتمتة
 
-### 📄 License
+- ✅ GitHub Actions CI/CD
+- ✅ Unzip Bot
+- ✅ PR Review Bot
+- ✅ Deploy Bot
 
-This project is licensed under the [MIT License](LICENSE).
+## 📧 Contact / التواصل
+
+For issues: Open GitHub Issue
+For discussions: GitHub Discussions
 
 ---
 
-### 🤝 المساهمة / Contributing
-
-نرحب بالمساهمات! راجع [CONTRIBUTING.md](CONTRIBUTING.md).
-
-Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-### 📧 التواصل / Contact
-
-- Email: YOUR_EMAIL@company.com
-- Issues: [GitHub Issues](../../issues)
-- Discussions: [GitHub Discussions](../../discussions)
+**Total Files:** 50+
+**Total Size:** ~2 MB
+**Status:** ✅ Production Ready

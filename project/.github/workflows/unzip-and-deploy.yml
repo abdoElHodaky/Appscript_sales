@@ -1,0 +1,73 @@
+name: Unzip & Deploy (with Bot)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  bot-unzip-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332  # v4.1.7
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Setup Bot
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Detect & Unzip
+      id: unzip
+      run: |
+        ZIP=$(ls *.zip 2>/dev/null | head -1)
+        if [ -z "$ZIP" ]; then
+          echo "No ZIP found"
+          echo "has_zip=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        echo "has_zip=true" >> $GITHUB_OUTPUT
+        echo "zip_name=$ZIP" >> $GITHUB_OUTPUT
+
+        mkdir -p .temp
+        unzip -o "$ZIP" -d .temp/
+
+        # Move to root
+        if [ $(ls -1 .temp/ | wc -l) -eq 1 ]; then
+          SUB=$(ls -1 .temp/ | head -1)
+          mv .temp/$SUB/* . 2>/dev/null || true
+        else
+          mv .temp/* . 2>/dev/null || true
+        fi
+
+        rm -rf .temp "$ZIP"
+
+    - name: Push Unzipped Files
+      if: steps.unzip.outputs.has_zip == 'true'
+      run: |
+        git add -A
+        git diff --cached --quiet || git commit -m "🤖 Bot: Unzipped ${{ steps.unzip.outputs.zip_name }}"
+        git push
+
+    - name: Setup Node
+      uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee0682c27e  # v4.0.3
+      with:
+        node-version: '22'
+
+    - name: Install & Deploy
+      run: |
+        npm install
+        npm run lint
+        npm test
+
+        # Deploy to Apps Script
+        npm install -g @google/clasp
+        echo '${{ secrets.CLASPRC }}' > ~/.clasprc.json
+        clasp push
+        clasp deploy

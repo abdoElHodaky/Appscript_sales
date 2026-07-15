@@ -1,0 +1,26 @@
+**/**
+!src/**
+!appsscript.json
+
+# Ignore tests (not needed in Apps Script)
+tests/**
+
+# Ignore docs
+docs/**
+
+# Ignore assets
+assets/**
+
+# Ignore scripts
+scripts/**
+
+# Ignore config files
+README.md
+LICENSE
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+CHANGELOG.md
+.gitignore
+package.json
+package-lock.json
+node_modules/**
