@@ -129,7 +129,7 @@ jobs:
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         branch: ${{ github.ref_name }}
-        force: false
+        force: true
         # Optional: push to specific repository
         # repository: ${{ github.repository }}
 
