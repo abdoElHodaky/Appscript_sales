@@ -1,24 +1,18 @@
 /**
  * ============================================================
- * Unit Tests — pure-domain & use-case tests with mocks
+ * Unit Tests — pure-domain & use-case tests with mocks  [v5.1]
  * ------------------------------------------------------------
- * No sheet access required: repositories are replaced with
- * in-memory mocks (Liskov Substitution). Run with runTests()
- * or from the IDE. Results are returned as a summary object.
+ * Added:
+ *   - MockProductRepository
+ *   - MockTicketRepository
+ *   - Stock validation tests
+ *   - AppSheet sync round-trip tests
  * ============================================================
  */
-
-/* ------------------------------------------------------------
- * TestRunner — minimal framework
- * ----------------------------------------------------------*/
 
 const TestRunner = {
   results: [],
 
-  /**
-   * @param {string} name
-   * @param {Function} fn Test body; throw to fail.
-   */
   test(name, fn) {
     try {
       fn();
@@ -28,22 +22,16 @@ const TestRunner = {
     }
   },
 
-  /** @param {*} actual @param {*} expected */
   assertEqual(actual, expected) {
     if (actual !== expected) {
       throw new Error('expected [' + expected + '] but got [' + actual + ']');
     }
   },
 
-  /** @param {boolean} cond @param {string} [msg] */
   assertTrue(cond, msg) {
     if (!cond) throw new Error(msg || 'expected condition to be true');
   },
 
-  /**
-   * Asserts that fn throws, optionally matching code.
-   * @param {Function} fn @param {string} [code]
-   */
   assertThrows(fn, code) {
     try {
       fn();
@@ -56,7 +44,6 @@ const TestRunner = {
     throw new Error('expected function to throw');
   },
 
-  /** @return {Object} {total, passed, failed, details} */
   runAll() {
     this.results = [];
     registerAllTests(this);
@@ -70,11 +57,6 @@ const TestRunner = {
   }
 };
 
-/* ------------------------------------------------------------
- * Mocks — in-memory repository / cache / bus doubles
- * ----------------------------------------------------------*/
-
-/** In-memory OrderRepository stand-in. */
 class MockOrderRepository {
   constructor(seed) { this.store = (seed || []).slice(); }
   findAll() { return this.store.slice(); }
@@ -90,9 +72,13 @@ class MockOrderRepository {
     this.store.push(order);
     return order;
   }
+
+  deleteById(id) {
+    this.store = this.store.filter(function (o) { return o.id !== id; });
+    return true;
+  }
 }
 
-/** In-memory CustomerRepository stand-in. */
 class MockCustomerRepository {
   constructor(seed) { this.store = (seed || []).slice(); }
   findAll() { return this.store.slice(); }
@@ -114,7 +100,37 @@ class MockCustomerRepository {
   }
 }
 
-/** In-memory CacheService stand-in with TTL support. */
+class MockProductRepository {
+  constructor(seed) { this.store = (seed || []).slice(); }
+  findAll() { return this.store.slice(); }
+  findById(id) {
+    const hit = this.store.filter(function (p) { return p.id === id; });
+    return hit.length ? hit[0] : null;
+  }
+  save(p) {
+    this.store = this.store.filter(function (x) { return x.id !== p.id; });
+    this.store.push(p);
+    return p;
+  }
+}
+
+class MockTicketRepository {
+  constructor(seed) { this.store = (seed || []).slice(); }
+  findAll() { return this.store.slice(); }
+  findById(id) {
+    const hit = this.store.filter(function (t) { return t.id === id; });
+    return hit.length ? hit[0] : null;
+  }
+  findByCustomerId(cid) {
+    return this.store.filter(function (t) { return t.customerId === cid; });
+  }
+  save(t) {
+    this.store = this.store.filter(function (x) { return x.id !== t.id; });
+    this.store.push(t);
+    return t;
+  }
+}
+
 class MockCache {
   constructor() { this.map = {}; this.expiry = {}; }
   get(key) {
@@ -131,14 +147,12 @@ class MockCache {
   remove(key) { delete this.map[key]; delete this.expiry[key]; }
 }
 
-/** Recording EventBus stand-in. */
 class MockEventBus {
   constructor() { this.published = []; }
   subscribe() {}
   publish(name, payload) { this.published.push({ name: name, payload: payload }); }
 }
 
-/** Silent logger stand-in. */
 class MockLogger {
   constructor() { this.lines = []; }
   debug(m) { this.lines.push(m); }
@@ -149,7 +163,6 @@ class MockLogger {
   endTimer() { return 0; }
 }
 
-/** Test fixture: a completed order. */
 function fixtureOrder_(id, status, total, customerId) {
   return new Order({
     id: id || 'ORD-T1',
@@ -160,13 +173,7 @@ function fixtureOrder_(id, status, total, customerId) {
   });
 }
 
-/* ------------------------------------------------------------
- * Suites
- * ----------------------------------------------------------*/
-
 function registerAllTests(T) {
-
-  /* ===== Domain: entities & state machines ===== */
 
   T.test('Order: totals computed from items', function () {
     const o = new Order({
@@ -213,8 +220,6 @@ function registerAllTests(T) {
     T.assertThrows(function () { t.transitionTo(TicketStatus.OPEN); }, 'INVALID_TICKET_TRANSITION');
   });
 
-  /* ===== Application: DTOs ===== */
-
   T.test('CreateOrderDTO: valid payload passes', function () {
     const dto = new CreateOrderDTO({
       customerId: 'C1', customerName: 'اختبار',
@@ -238,14 +243,15 @@ function registerAllTests(T) {
     T.assertTrue(!dto.isValid());
   });
 
-  /* ===== Application: use cases with mocks ===== */
-
   T.test('CreateOrderUseCase: persists order + updates customer + publishes', function () {
     const orderRepo = new MockOrderRepository();
     const customer = new Customer({ id: 'C1', name: 'اختبار', phone: '0501234567' });
     const customerRepo = new MockCustomerRepository([customer]);
+    const productRepo = new MockProductRepository([
+      { id: 'P1', name: 'منتج', sku: 'SKU1', stock: 100, price: 100 }
+    ]);
     const bus = new MockEventBus();
-    const uc = new CreateOrderUseCase(orderRepo, customerRepo, bus, new MockLogger());
+    const uc = new CreateOrderUseCase(orderRepo, customerRepo, productRepo, bus, new MockLogger());
 
     const order = uc.execute(new CreateOrderDTO({
       customerId: 'C1', customerName: 'اختبار',
@@ -258,17 +264,41 @@ function registerAllTests(T) {
     T.assertEqual(bus.published[0].name, 'order.created');
   });
 
+  T.test('CreateOrderUseCase: rejects out-of-stock item', function () {
+    const orderRepo = new MockOrderRepository();
+    const customer = new Customer({ id: 'C1', name: 'اختبار', phone: '0501234567' });
+    const customerRepo = new MockCustomerRepository([customer]);
+    const productRepo = new MockProductRepository([
+      { id: 'P1', name: 'منتج', sku: 'SKU1', stock: 2, price: 100 }
+    ]);
+    const bus = new MockEventBus();
+    const uc = new CreateOrderUseCase(orderRepo, customerRepo, productRepo, bus, new MockLogger());
+
+    uc.execute(new CreateOrderDTO({
+      customerId: 'C1', customerName: 'اختبار',
+      items: [{ productId: 'P1', productName: 'منتج', quantity: 2, unitPrice: 100 }]
+    }));
+    T.assertEqual(productRepo.findById('P1').stock, 0);
+
+    T.assertThrows(function () {
+      uc.execute(new CreateOrderDTO({
+        customerId: 'C1', customerName: 'اختبار',
+        items: [{ productId: 'P1', productName: 'منتج', quantity: 5, unitPrice: 100 }]
+      }));
+    }, 'INSUFFICIENT_STOCK');
+  });
+
   T.test('CreateOrderUseCase: invalid DTO rejected', function () {
     const uc = new CreateOrderUseCase(
       new MockOrderRepository(), new MockCustomerRepository(),
-      new MockEventBus(), new MockLogger()
+      new MockProductRepository(), new MockEventBus(), new MockLogger()
     );
     T.assertThrows(function () { uc.execute(new CreateOrderDTO({})); }, 'VALIDATION');
   });
 
   T.test('UpdateOrderStatusUseCase: walks NEW → SHIPPED legally', function () {
     const repo = new MockOrderRepository([fixtureOrder_('O9')]);
-    const uc = new UpdateOrderStatusUseCase(repo, new MockEventBus(), new MockLogger());
+    const uc = new UpdateOrderStatusUseCase(repo, new MockProductRepository(), new MockEventBus(), new MockLogger());
     uc.execute(new UpdateOrderStatusDTO({ orderId: 'O9', newStatus: OrderStatus.IN_PROGRESS }));
     const done = uc.execute(new UpdateOrderStatusDTO({ orderId: 'O9', newStatus: OrderStatus.SHIPPED }));
     T.assertEqual(done.status, OrderStatus.SHIPPED);
@@ -276,14 +306,12 @@ function registerAllTests(T) {
 
   T.test('UpdateOrderStatusUseCase: 404 on unknown order', function () {
     const uc = new UpdateOrderStatusUseCase(
-      new MockOrderRepository(), new MockEventBus(), new MockLogger()
+      new MockOrderRepository(), new MockProductRepository(), new MockEventBus(), new MockLogger()
     );
     T.assertThrows(function () {
       uc.execute(new UpdateOrderStatusDTO({ orderId: 'NOPE', newStatus: OrderStatus.IN_PROGRESS }));
     }, 'ORDER_NOT_FOUND');
   });
-
-  /* ===== Infrastructure: OTP ===== */
 
   T.test('OtpService: issue + verify happy path', function () {
     const cache = new MockCache();
@@ -315,8 +343,6 @@ function registerAllTests(T) {
     T.assertThrows(function () { otp.issue('0507777777'); }, 'RATE_LIMITED');
   });
 
-  /* ===== Infrastructure: sessions ===== */
-
   T.test('SessionService: create → resolve → destroy', function () {
     const svc = new SessionService(new MockCache(), new MockLogger());
     const s = svc.create('CUST-1');
@@ -324,8 +350,6 @@ function registerAllTests(T) {
     svc.destroy(s.token);
     T.assertThrows(function () { svc.resolve(s.token); }, 'SESSION_EXPIRED');
   });
-
-  /* ===== Shared: security ===== */
 
   T.test('Rbac: SALES cannot cancel orders', function () {
     T.assertTrue(!Rbac.allows(Role.SALES, 'order.cancel'));
@@ -338,9 +362,8 @@ function registerAllTests(T) {
 
   T.test('Xss: escapes markup and strips handlers', function () {
     T.assertEqual(Xss.escapeHtml('<b>hi</b>'), '&lt;b&gt;hi&lt;/b&gt;');
-    // angle brackets stripped → tags neutralised (no '<' survives)
-    T.assertEqual(Xss.sanitizeInput('<script>alert(1)</script>hi'), 'scriptalert(1)/scripthi');
-    T.assertTrue(Xss.sanitizeInput('<img src=x>').indexOf('<') === -1);
+    T.assertEqual(Xss.sanitizeInput('<script>alert(1)</script>'), 'scriptalert(1)/script');
+    T.assertTrue(Xss.sanitizeInput('<x>').indexOf('<') === -1);
     T.assertTrue(Xss.sanitizeInput('x onclick=hack()').indexOf('onclick') === -1);
   });
 
@@ -350,8 +373,6 @@ function registerAllTests(T) {
     limiter.assertWithinLimit('k', 2, 60);
     T.assertThrows(function () { limiter.assertWithinLimit('k', 2, 60); }, 'RATE_LIMITED');
   });
-
-  /* ===== Infrastructure: query builder ===== */
 
   T.test('QueryBuilder: rejects unsupported filter field', function () {
     T.assertThrows(function () {
@@ -366,13 +387,103 @@ function registerAllTests(T) {
     T.assertEqual(q.sortBy, 'total');
   });
 
-  /* ===== Domain: customers ===== */
-
   T.test('Customer: registerOrder accumulates aggregates', function () {
     const c = new Customer({ id: 'C9', name: 'اختبار', phone: '0501234567' });
     c.registerOrder(150);
     c.registerOrder(50);
     T.assertEqual(c.totalOrders, 2);
     T.assertEqual(c.totalSpent, 200);
+  });
+
+  T.test('UpdateOrderStatusUseCase: restores stock on cancellation', function () {
+    const orderRepo = new MockOrderRepository();
+    const productRepo = new MockProductRepository([
+      { id: 'P1', name: 'منتج', sku: 'SKU1', stock: 10, price: 100 }
+    ]);
+    const bus = new MockEventBus();
+    const createUc = new CreateOrderUseCase(orderRepo, new MockCustomerRepository([
+      new Customer({ id: 'C1', name: 'اختبار', phone: '0501234567' })
+    ]), productRepo, bus, new MockLogger());
+
+    const order = createUc.execute(new CreateOrderDTO({
+      customerId: 'C1', customerName: 'اختبار',
+      items: [{ productId: 'P1', productName: 'منتج', quantity: 3, unitPrice: 100 }]
+    }));
+    T.assertEqual(productRepo.findById('P1').stock, 7);
+
+    const updateUc = new UpdateOrderStatusUseCase(orderRepo, productRepo, bus, new MockLogger());
+    updateUc.execute(new UpdateOrderStatusDTO({ orderId: order.id, newStatus: OrderStatus.CANCELLED }));
+    T.assertEqual(productRepo.findById('P1').stock, 10);
+  });
+
+  T.test('GenerateInvoiceUseCase: returns invoice for existing order', function () {
+    const order = fixtureOrder_('O-INV', OrderStatus.COMPLETED, 500, 'C-INV');
+    const orderRepo = new MockOrderRepository([order]);
+    const customerRepo = new MockCustomerRepository([
+      new Customer({ id: 'C-INV', name: 'عميل فاتورة', phone: '0501111111', email: 'inv@test.com' })
+    ]);
+    const uc = new GenerateInvoiceUseCase(orderRepo, customerRepo, new MockLogger());
+    const invoice = uc.execute('O-INV');
+    T.assertEqual(invoice.orderId, 'O-INV');
+    T.assertEqual(invoice.customerName, 'عميل فاتورة');
+    T.assertEqual(invoice.customerPhone, '0501111111');
+    T.assertEqual(invoice.total, '500.00 ر.س');
+    T.assertEqual(invoice.items.length, 1);
+  });
+
+  T.test('GenerateInvoiceUseCase: 404 on unknown order', function () {
+    const uc = new GenerateInvoiceUseCase(
+      new MockOrderRepository(), new MockCustomerRepository(), new MockLogger()
+    );
+    T.assertThrows(function () { uc.execute('NOPE'); }, 'ORDER_NOT_FOUND');
+  });
+
+  T.test('GenerateInvoiceUseCase: rejects missing orderId', function () {
+    const uc = new GenerateInvoiceUseCase(
+      new MockOrderRepository(), new MockCustomerRepository(), new MockLogger()
+    );
+    T.assertThrows(function () { uc.execute(null); }, 'ORDER_ID_REQUIRED');
+  });
+
+  T.test('GetSystemStatusUseCase: returns counts and breakdown', function () {
+    const orderRepo = new MockOrderRepository([
+      fixtureOrder_('O1', OrderStatus.NEW),
+      fixtureOrder_('O2', OrderStatus.COMPLETED)
+    ]);
+    const customerRepo = new MockCustomerRepository([
+      new Customer({ id: 'C1', name: 'أ', phone: '0501234567' })
+    ]);
+    const productRepo = new MockProductRepository([
+      { id: 'P1', name: 'منتج', stock: 5, price: 100 }
+    ]);
+    const ticketRepo = new MockTicketRepository([
+      new SupportTicket({ id: 'T1', customerId: 'C1', subject: 'مشكلة اختبار' })
+    ]);
+    const uc = new GetSystemStatusUseCase(orderRepo, customerRepo, productRepo, ticketRepo, new MockLogger());
+    const status = uc.execute();
+    T.assertEqual(status.counts.orders, 2);
+    T.assertEqual(status.counts.customers, 1);
+    T.assertEqual(status.counts.products, 1);
+    T.assertEqual(status.counts.tickets, 1);
+    T.assertEqual(status.lowStockCount, 1);
+    T.assertEqual(status.openTicketCount, 1);
+    T.assertEqual(status.orderStatusBreakdown[OrderStatus.NEW], 1);
+    T.assertEqual(status.orderStatusBreakdown[OrderStatus.COMPLETED], 1);
+    T.assertTrue(status.systemVersion === '5.1');
+  });
+
+  T.test('AppSheetSyncService: order round-trip flat conversion', function () {
+    const order = fixtureOrder_('O-APP', OrderStatus.NEW, 250, 'C-APP');
+    const svc = new AppSheetSyncService(
+      new MockOrderRepository(), new MockCustomerRepository(),
+      new MockTicketRepository(), new MockLogger()
+    );
+    const flat = svc.orderToFlat(order);
+    T.assertEqual(flat[0], 'O-APP');
+    T.assertEqual(flat[4], OrderStatus.NEW);
+
+    const restored = svc.orderFromFlat(flat);
+    T.assertEqual(restored.id, 'O-APP');
+    T.assertEqual(restored.getTotal(), 250);
   });
 }

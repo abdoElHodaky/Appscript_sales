@@ -1,17 +1,13 @@
 /**
  * ============================================================
- * Infrastructure Layer — Alert Services
+ * Infrastructure Layer — Alert Services  [v5.1]
  * ------------------------------------------------------------
- * Split into focused units (was one god-class):
- *   - AlertRule         : condition + threshold + priority
- *   - AlertEngine       : evaluates rules against a context
- *   - AlertDelivery     : email channel with sanitised body
- *   - AlertHistory      : cooldown store + audit trail
- *   - defaultRules()    : the 6 built-in business rules
+ * Changes:
+ *   - AlertHistory.inCooldown now respects cooldowns longer
+ *     than 6h by checking an explicit expiry timestamp.
  * ============================================================
  */
 
-/** @enum {number} Alert priority (lower = more urgent). */
 const AlertPriority = Object.freeze({
   CRITICAL: 1,
   HIGH: 2,
@@ -19,19 +15,7 @@ const AlertPriority = Object.freeze({
   LOW: 4
 });
 
-/* ------------------------------------------------------------
- * AlertRule
- * ----------------------------------------------------------*/
-
 class AlertRule {
-  /**
-   * @param {Object} props
-   * @param {string} props.id          Unique rule id.
-   * @param {string} props.name        Human label.
-   * @param {number} props.priority    AlertPriority value.
-   * @param {number} props.cooldownMin Minimum minutes between firings.
-   * @param {Function} props.condition (context) → {fired: boolean, message: string}
-   */
   constructor(props) {
     if (!props.id) throw new DomainError('معرّف القاعدة مطلوب', 'RULE_ID_REQUIRED');
     if (typeof props.condition !== 'function') {
@@ -45,69 +29,54 @@ class AlertRule {
   }
 }
 
-/* ------------------------------------------------------------
- * AlertHistory — cooldown + audit via CacheService
- * ----------------------------------------------------------*/
-
 class AlertHistory {
-  /**
-   * @param {Cache} cache
-   * @param {Logger} logger
-   */
   constructor(cache, logger) {
     this.cache = cache;
     this.logger = logger;
   }
 
-  /**
-   * @param {string} ruleId
-   * @return {boolean} True while the rule is inside its cooldown.
-   */
   inCooldown(ruleId) {
-    return this.cache.get('alert:cd:' + ruleId) !== null;
+    const cdRaw = this.cache.get('alert:cd:' + ruleId);
+    if (!cdRaw) return false;
+
+    const startedAt = parseInt(cdRaw, 10);
+    const expiryRaw = this.cache.get('alert:cd_expiry:' + ruleId);
+    if (expiryRaw) {
+      const expiresAt = parseInt(expiryRaw, 10);
+      return Date.now() < expiresAt;
+    }
+    return true;
   }
 
-  /**
-   * Marks a rule as fired; enforces cooldown for cooldownMin.
-   * @param {string} ruleId
-   * @param {number} cooldownMin
-   */
   markFired(ruleId, cooldownMin) {
-    this.cache.put('alert:cd:' + ruleId, String(Date.now()), cooldownMin * 60);
+    const ttlSec = Math.min(cooldownMin * 60, 21600);
+    this.cache.put('alert:cd:' + ruleId, String(Date.now()), ttlSec);
+
+    if (cooldownMin * 60 > 21600) {
+      const expiresAt = Date.now() + (cooldownMin * 60 * 1000);
+      this.cache.put('alert:cd_expiry:' + ruleId, String(expiresAt), ttlSec);
+    }
+
     const logKey = 'alert:log';
     const raw = this.cache.get(logKey);
     const log = raw ? JSON.parse(raw) : [];
     log.push({ ruleId: ruleId, at: new Date().toISOString() });
     while (log.length > 100) log.shift();
-    this.cache.put(logKey, JSON.stringify(log), 21600); // 6h audit window
+    this.cache.put(logKey, JSON.stringify(log), 21600);
   }
 
-  /** @return {Object[]} Recent firings (≤100). */
   getRecent() {
     const raw = this.cache.get('alert:log');
     return raw ? JSON.parse(raw) : [];
   }
 }
 
-/* ------------------------------------------------------------
- * AlertDelivery — email channel
- * ----------------------------------------------------------*/
-
 class AlertDelivery {
-  /**
-   * @param {Logger} logger
-   * @param {string} [recipient] Override recipient; defaults to script owner.
-   */
   constructor(logger, recipient) {
     this.logger = logger;
     this.recipient = recipient || Session.getEffectiveUser().getEmail();
   }
 
-  /**
-   * Sends a sanitised alert email.
-   * @param {AlertRule} rule
-   * @param {string} message Evaluated message (will be sanitised).
-   */
   send(rule, message) {
     const safeBody = Xss.sanitizeInput(message);
     const subject = '🔔 تنبيه: ' + Xss.sanitizeInput(rule.name);
@@ -115,23 +84,12 @@ class AlertDelivery {
       MailApp.sendEmail(this.recipient, subject, safeBody);
       this.logger.info('alert delivered', { rule: rule.id });
     } catch (err) {
-      // Delivery failure must never break the evaluating use case.
       this.logger.error('alert delivery failed', { rule: rule.id, error: err });
     }
   }
 }
 
-/* ------------------------------------------------------------
- * AlertEngine — evaluates rules with lock + idempotency
- * ----------------------------------------------------------*/
-
 class AlertEngine {
-  /**
-   * @param {AlertRule[]} rules
-   * @param {AlertHistory} history
-   * @param {AlertDelivery} delivery
-   * @param {Logger} logger
-   */
   constructor(rules, history, delivery, logger) {
     this.rules = rules.slice().sort(function (a, b) { return a.priority - b.priority; });
     this.history = history;
@@ -139,12 +97,6 @@ class AlertEngine {
     this.logger = logger;
   }
 
-  /**
-   * Evaluates every rule against the context. A script lock plus
-   * cooldown records make concurrent triggers idempotent.
-   * @param {Object} context e.g. {orders, lowStock, pendingCount, stats}
-   * @return {{fired: number, skipped: number, results: Object[]}}
-   */
   evaluate(context) {
     const lock = LockService.getScriptLock();
     lock.waitLock(15000);
@@ -182,13 +134,6 @@ class AlertEngine {
   }
 }
 
-/* ------------------------------------------------------------
- * defaultRules — the 6 built-in business rules
- * ----------------------------------------------------------*/
-
-/**
- * @return {AlertRule[]}
- */
 function defaultAlertRules() {
   return [
     new AlertRule({

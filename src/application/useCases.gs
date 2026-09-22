@@ -1,31 +1,14 @@
 /**
  * ============================================================
- * Application Layer — Use Cases
+ * Application Layer — Use Cases  [v5.1]
  * ------------------------------------------------------------
- * One class per application operation (Single Responsibility).
- * Use cases orchestrate domain entities + infrastructure via
- * injected interfaces — they contain no framework code.
- *
- *   1  CreateOrderUseCase
- *   2  UpdateOrderStatusUseCase
- *   3  SearchOrdersUseCase
- *   4  CalculateKPIsUseCase
- *   5  GenerateChartsUseCase
- *   6  GenerateTablesUseCase
- *   7  EvaluateAlertRulesUseCase
- *   8  GetAlertStatisticsUseCase
- *   9  AuthenticateCustomerUseCase (OTP request + verify)
- *   10 CreateSupportTicketUseCase
+ * Changes:
+ *   - CreateOrderUseCase now validates stock and deducts it
+ *   - CreateOrderUseCase receives ProductRepository
  * ============================================================
  */
 
-/** Base class: shared guard for DTO validity. */
 class BaseUseCase {
-  /**
-   * @protected
-   * @param {BaseDTO} dto
-   * @throws {DomainError} Listing all validation failures.
-   */
   assertValid_(dto) {
     if (!dto.isValid()) {
       throw new DomainError('مدخلات غير صالحة: ' + dto.getErrors().join('؛ '), 'VALIDATION');
@@ -33,33 +16,37 @@ class BaseUseCase {
   }
 }
 
-/* ============================================================
- * 1. CreateOrderUseCase
- * ==========================================================*/
-
 class CreateOrderUseCase extends BaseUseCase {
-  /**
-   * @param {OrderRepository} orderRepo
-   * @param {CustomerRepository} customerRepo
-   * @param {EventBus} eventBus
-   * @param {Logger} logger
-   */
-  constructor(orderRepo, customerRepo, eventBus, logger) {
+  constructor(orderRepo, customerRepo, productRepo, eventBus, logger) {
     super();
     this.orderRepo = orderRepo;
     this.customerRepo = customerRepo;
+    this.productRepo = productRepo;
     this.eventBus = eventBus;
     this.logger = logger;
   }
 
-  /**
-   * @param {CreateOrderDTO} dto
-   * @return {Order}
-   */
   execute(dto) {
     this.assertValid_(dto);
     this.logger.startTimer('usecase:createOrder');
 
+    // 1. Validate stock availability
+    for (let i = 0; i < dto.items.length; i++) {
+      const it = dto.items[i];
+      const product = this.productRepo.findById(it.productId);
+      if (!product) {
+        throw new DomainError('المنتج غير موجود: ' + it.productId, 'PRODUCT_NOT_FOUND');
+      }
+      if (typeof product.stock !== 'number' || product.stock < it.quantity) {
+        throw new DomainError(
+          'المخزون غير كافٍ: ' + (product.name || it.productId) +
+          ' (متاح: ' + (product.stock || 0) + '، مطلوب: ' + it.quantity + ')',
+          'INSUFFICIENT_STOCK'
+        );
+      }
+    }
+
+    // 2. Create and persist order FIRST
     const items = dto.items.map(function (i) { return new OrderItem(i); });
     const order = new Order({
       id: IdGenerator.next('ORD'),
@@ -71,11 +58,32 @@ class CreateOrderUseCase extends BaseUseCase {
     });
     this.orderRepo.save(order);
 
-    // Keep customer aggregates fresh (create-if-missing for walk-ins).
+    // 3. Deduct stock AFTER successful order save (with rollback on failure)
+    try {
+      for (let i = 0; i < dto.items.length; i++) {
+        const it = dto.items[i];
+        const product = this.productRepo.findById(it.productId);
+        product.stock -= it.quantity;
+        this.productRepo.save(product);
+      }
+    } catch (stockErr) {
+      this.logger.error('stock deduction failed, rolling back order', {
+        orderId: order.id,
+        error: stockErr.message
+      });
+      this.orderRepo.deleteById(order.id);
+      throw new DomainError(
+        'فشل تحديث المخزون بعد إنشاء الطلب. تم إلغاء الطلب تلقائياً.',
+        'STOCK_UPDATE_FAILED'
+      );
+    }
+
+    // 4. Update customer aggregates
     let customer = this.customerRepo.findById(dto.customerId);
     if (customer) {
       customer.registerOrder(order.getTotal());
       this.customerRepo.save(customer);
+      this.eventBus.publish('customer.updated', customer.toJSON());
     }
 
     this.eventBus.publish('order.created', order.toJSON());
@@ -84,53 +92,58 @@ class CreateOrderUseCase extends BaseUseCase {
   }
 }
 
-/* ============================================================
- * 2. UpdateOrderStatusUseCase
- * ==========================================================*/
-
 class UpdateOrderStatusUseCase extends BaseUseCase {
-  /**
-   * @param {OrderRepository} orderRepo
-   * @param {EventBus} eventBus
-   * @param {Logger} logger
-   */
-  constructor(orderRepo, eventBus, logger) {
+  constructor(orderRepo, productRepo, eventBus, logger) {
     super();
     this.orderRepo = orderRepo;
+    this.productRepo = productRepo;
     this.eventBus = eventBus;
     this.logger = logger;
   }
 
-  /**
-   * @param {UpdateOrderStatusDTO} dto
-   * @return {Order}
-   * @throws {DomainError} 404-style when the order is unknown.
-   */
   execute(dto) {
     this.assertValid_(dto);
     const order = this.orderRepo.findById(dto.orderId);
     if (!order) throw new DomainError('الطلب غير موجود: ' + dto.orderId, 'ORDER_NOT_FOUND');
 
-    order.transitionTo(dto.newStatus); // state machine enforces legality
+    const previousStatus = order.status;
+    order.transitionTo(dto.newStatus);
+
+    // Restore stock when order is cancelled
+    if (dto.newStatus === OrderStatus.CANCELLED && previousStatus !== OrderStatus.CANCELLED) {
+      try {
+        for (let i = 0; i < order.items.length; i++) {
+          const item = order.items[i];
+          const product = this.productRepo.findById(item.productId);
+          if (product) {
+            product.stock = (typeof product.stock === 'number' ? product.stock : 0) + item.quantity;
+            this.productRepo.save(product);
+            this.logger.info('stock restored on cancellation', {
+              productId: item.productId,
+              quantity: item.quantity,
+              orderId: order.id
+            });
+          }
+        }
+      } catch (stockErr) {
+        this.logger.error('stock restoration failed on cancellation', {
+          orderId: order.id,
+          error: stockErr.message
+        });
+        // Do not block cancellation if stock restore fails — log and continue
+      }
+    }
+
     this.orderRepo.save(order);
     this.eventBus.publish('order.statusChanged', {
       id: order.id, status: order.status, reason: dto.reason
     });
-    this.logger.info('order status changed', { id: order.id, to: dto.newStatus });
+    this.logger.info('order status changed', { id: order.id, from: previousStatus, to: dto.newStatus });
     return order;
   }
 }
 
-/* ============================================================
- * 3. SearchOrdersUseCase
- * ==========================================================*/
-
 class SearchOrdersUseCase extends BaseUseCase {
-  /**
-   * @param {SearchEngine} searchEngine
-   * @param {RateLimiter} rateLimiter
-   * @param {Logger} logger
-   */
   constructor(searchEngine, rateLimiter, logger) {
     super();
     this.searchEngine = searchEngine;
@@ -138,11 +151,6 @@ class SearchOrdersUseCase extends BaseUseCase {
     this.logger = logger;
   }
 
-  /**
-   * @param {SearchOrdersDTO} dto
-   * @param {string} callerKey Rate-limit bucket (email/IP).
-   * @return {Object} ResultFormatter.toApi() payload.
-   */
   execute(dto, callerKey) {
     this.assertValid_(dto);
     this.rateLimiter.assertWithinLimit('search:' + (callerKey || 'anon'), 30, 300);
@@ -160,17 +168,7 @@ class SearchOrdersUseCase extends BaseUseCase {
   }
 }
 
-/* ============================================================
- * 4. CalculateKPIsUseCase
- * ==========================================================*/
-
 class CalculateKPIsUseCase extends BaseUseCase {
-  /**
-   * @param {OrderRepository} orderRepo
-   * @param {CustomerRepository} customerRepo
-   * @param {Cache} cache
-   * @param {Logger} logger
-   */
   constructor(orderRepo, customerRepo, cache, logger) {
     super();
     this.orderRepo = orderRepo;
@@ -179,12 +177,6 @@ class CalculateKPIsUseCase extends BaseUseCase {
     this.logger = logger;
   }
 
-  /**
-   * Computes the 6 KPI cards for a date range.
-   * Results cached 5 minutes per range+role key.
-   * @param {DashboardQueryDTO} dto
-   * @return {Object} {sales, orders, aov, completionRate, cancellationRate, activeCustomers}
-   */
   execute(dto) {
     this.assertValid_(dto);
     const cacheKey = 'kpi:' + dto.dateRange + ':' + dto.userRole + ':' +
@@ -197,7 +189,6 @@ class CalculateKPIsUseCase extends BaseUseCase {
       return o.createdAt >= range.from && o.createdAt <= range.to;
     });
 
-    // Role scoping: SALES sees own orders only (matched by email in notes).
     if (dto.userRole === Role.SALES && dto.userEmail) {
       const email = dto.userEmail;
       orders = orders.filter(function (o) { return o.notes.indexOf(email) !== -1; });
@@ -225,16 +216,7 @@ class CalculateKPIsUseCase extends BaseUseCase {
   }
 }
 
-/* ============================================================
- * 5. GenerateChartsUseCase
- * ==========================================================*/
-
 class GenerateChartsUseCase extends BaseUseCase {
-  /**
-   * @param {OrderRepository} orderRepo
-   * @param {CustomerRepository} customerRepo
-   * @param {Logger} logger
-   */
   constructor(orderRepo, customerRepo, logger) {
     super();
     this.orderRepo = orderRepo;
@@ -242,11 +224,6 @@ class GenerateChartsUseCase extends BaseUseCase {
     this.logger = logger;
   }
 
-  /**
-   * Builds the 6 chart datasets for a date range.
-   * @param {DashboardQueryDTO} dto
-   * @return {Object} {salesTrend, statusDist, topProducts, hourlyDist, cityDist, customerGrowth}
-   */
   execute(dto) {
     this.assertValid_(dto);
     const range = DateRange.resolve(dto.dateRange, { from: dto.customFrom, to: dto.customTo });
@@ -264,7 +241,6 @@ class GenerateChartsUseCase extends BaseUseCase {
     };
   }
 
-  /** @private Daily sales series. */
   salesTrend_(orders) {
     const byDay = {};
     orders.forEach(function (o) {
@@ -279,7 +255,6 @@ class GenerateChartsUseCase extends BaseUseCase {
     };
   }
 
-  /** @private Orders per status. */
   statusDist_(orders) {
     const counts = {};
     Object.keys(OrderStatus).forEach(function (k) { counts[OrderStatus[k]] = 0; });
@@ -287,7 +262,6 @@ class GenerateChartsUseCase extends BaseUseCase {
     return { labels: Object.keys(counts), data: Object.keys(counts).map(function (k) { return counts[k]; }) };
   }
 
-  /** @private Top 5 products by quantity. */
   topProducts_(orders) {
     const qty = {};
     orders.forEach(function (o) {
@@ -299,7 +273,6 @@ class GenerateChartsUseCase extends BaseUseCase {
     return { labels: sorted, data: sorted.map(function (k) { return qty[k]; }) };
   }
 
-  /** @private Orders per hour (0–23). */
   hourlyDist_(orders) {
     const hours = [];
     for (let h = 0; h < 24; h++) hours.push(0);
@@ -310,7 +283,6 @@ class GenerateChartsUseCase extends BaseUseCase {
     };
   }
 
-  /** @private Orders per city (top 8). */
   cityDist_(orders) {
     const cities = {};
     orders.forEach(function (o) {
@@ -321,7 +293,6 @@ class GenerateChartsUseCase extends BaseUseCase {
     return { labels: sorted, data: sorted.map(function (k) { return cities[k]; }) };
   }
 
-  /** @private Cumulative customers inside the range. */
   customerGrowth_(range) {
     const customers = this.customerRepo.findAll().filter(function (c) {
       return c.createdAt <= range.to;
@@ -340,17 +311,7 @@ class GenerateChartsUseCase extends BaseUseCase {
   }
 }
 
-/* ============================================================
- * 6. GenerateTablesUseCase
- * ==========================================================*/
-
 class GenerateTablesUseCase extends BaseUseCase {
-  /**
-   * @param {OrderRepository} orderRepo
-   * @param {CustomerRepository} customerRepo
-   * @param {ProductRepository} productRepo
-   * @param {Logger} logger
-   */
   constructor(orderRepo, customerRepo, productRepo, logger) {
     super();
     this.orderRepo = orderRepo;
@@ -359,11 +320,6 @@ class GenerateTablesUseCase extends BaseUseCase {
     this.logger = logger;
   }
 
-  /**
-   * Builds the 4 dashboard tables.
-   * @param {DashboardQueryDTO} dto
-   * @return {Object} {recentOrders, topCustomers, pendingOrders, lowStock}
-   */
   execute(dto) {
     this.assertValid_(dto);
     const range = DateRange.resolve(dto.dateRange, { from: dto.customFrom, to: dto.customTo });
@@ -398,7 +354,6 @@ class GenerateTablesUseCase extends BaseUseCase {
     };
   }
 
-  /** @private */
   orderRow_(o) {
     return {
       id: o.id,
@@ -410,18 +365,7 @@ class GenerateTablesUseCase extends BaseUseCase {
   }
 }
 
-/* ============================================================
- * 7. EvaluateAlertRulesUseCase
- * ==========================================================*/
-
 class EvaluateAlertRulesUseCase {
-  /**
-   * @param {AlertEngine} alertEngine
-   * @param {OrderRepository} orderRepo
-   * @param {ProductRepository} productRepo
-   * @param {TicketRepository} ticketRepo
-   * @param {Logger} logger
-   */
   constructor(alertEngine, orderRepo, productRepo, ticketRepo, logger) {
     this.alertEngine = alertEngine;
     this.orderRepo = orderRepo;
@@ -430,10 +374,6 @@ class EvaluateAlertRulesUseCase {
     this.logger = logger;
   }
 
-  /**
-   * Assembles the evaluation context and runs the engine.
-   * @return {Object} AlertEngine.evaluate() summary.
-   */
   execute() {
     const orders = this.orderRepo.findAll();
     const completed = orders.filter(function (o) { return o.status === OrderStatus.COMPLETED; });
@@ -466,25 +406,53 @@ class EvaluateAlertRulesUseCase {
   }
 }
 
-/* ============================================================
- * 8. GetAlertStatisticsUseCase
- * ==========================================================*/
+
+class GenerateInvoiceUseCase extends BaseUseCase {
+  constructor(orderRepo, customerRepo, logger) {
+    super();
+    this.orderRepo = orderRepo;
+    this.customerRepo = customerRepo;
+    this.logger = logger;
+  }
+
+  execute(orderId) {
+    if (!orderId) throw new DomainError('معرّف الطلب مطلوب', 'ORDER_ID_REQUIRED');
+    const order = this.orderRepo.findById(orderId);
+    if (!order) throw new DomainError('الطلب غير موجود: ' + orderId, 'ORDER_NOT_FOUND');
+
+    const customer = this.customerRepo.findById(order.customerId);
+    this.logger.info('invoice generated', { orderId: orderId });
+
+    return {
+      orderId: order.id,
+      customerName: Xss.escapeHtml(order.customerName),
+      customerPhone: customer ? Xss.escapeHtml(customer.phone) : '',
+      customerEmail: customer ? Xss.escapeHtml(customer.email) : '',
+      customerCity: Xss.escapeHtml(order.city),
+      items: order.items.map(function (item) {
+        return {
+          productName: Xss.escapeHtml(item.productName),
+          quantity: item.quantity,
+          unitPrice: Formatter.currency(item.unitPrice),
+          lineTotal: Formatter.currency(item.getLineTotal())
+        };
+      }),
+      total: Formatter.currency(order.getTotal()),
+      status: order.status,
+      notes: Xss.escapeHtml(order.notes),
+      createdAt: Formatter.dateTime(order.createdAt),
+      invoiceDate: Formatter.dateTime(new Date())
+    };
+  }
+}
 
 class GetAlertStatisticsUseCase {
-  /**
-   * @param {AlertHistory} history
-   * @param {AlertRule[]} rules
-   * @param {Logger} logger
-   */
   constructor(history, rules, logger) {
     this.history = history;
     this.rules = rules;
     this.logger = logger;
   }
 
-  /**
-   * @return {Object} {totalRules, inCooldown, recentFirings}
-   */
   execute() {
     const recent = this.history.getRecent();
     const inCooldown = this.rules
@@ -498,17 +466,7 @@ class GetAlertStatisticsUseCase {
   }
 }
 
-/* ============================================================
- * 9. AuthenticateCustomerUseCase
- * ==========================================================*/
-
 class AuthenticateCustomerUseCase extends BaseUseCase {
-  /**
-   * @param {CustomerRepository} customerRepo
-   * @param {OtpService} otpService
-   * @param {SessionService} sessionService
-   * @param {Logger} logger
-   */
   constructor(customerRepo, otpService, sessionService, logger) {
     super();
     this.customerRepo = customerRepo;
@@ -517,29 +475,16 @@ class AuthenticateCustomerUseCase extends BaseUseCase {
     this.logger = logger;
   }
 
-  /**
-   * Step 1 — request an OTP. Unknown phones get the same generic
-   * answer so the endpoint cannot be used to enumerate customers.
-   * @param {RequestOtpDTO} dto
-   * @return {Object} {sent: true, expiresInSec, devCode?}
-   */
   requestOtp(dto) {
     this.assertValid_(dto);
     const customer = this.customerRepo.findByPhone(dto.phone);
     if (!customer) {
       this.logger.warn('otp requested for unknown phone', { phone: Formatter.maskPhone(dto.phone) });
-      // Return the same shape; no enumeration leak.
       return { sent: true, expiresInSec: 300 };
     }
     return this.otpService.issue(dto.phone);
   }
 
-  /**
-   * Step 2 — verify the OTP and open a session.
-   * @param {VerifyOtpDTO} dto
-   * @return {Object} {token, expiresAt, customer}
-   * @throws {SecurityError} On bad/expired code or unknown customer.
-   */
   verifyOtp(dto) {
     this.assertValid_(dto);
     const customer = this.customerRepo.findByPhone(dto.phone);
@@ -559,16 +504,7 @@ class AuthenticateCustomerUseCase extends BaseUseCase {
   }
 }
 
-/* ============================================================
- * 10. CreateSupportTicketUseCase
- * ==========================================================*/
-
 class CreateSupportTicketUseCase extends BaseUseCase {
-  /**
-   * @param {TicketRepository} ticketRepo
-   * @param {EventBus} eventBus
-   * @param {Logger} logger
-   */
   constructor(ticketRepo, eventBus, logger) {
     super();
     this.ticketRepo = ticketRepo;
@@ -576,11 +512,6 @@ class CreateSupportTicketUseCase extends BaseUseCase {
     this.logger = logger;
   }
 
-  /**
-   * @param {CreateTicketDTO} dto
-   * @param {string} customerId From the authenticated session.
-   * @return {SupportTicket}
-   */
   execute(dto, customerId) {
     this.assertValid_(dto);
     if (!customerId) throw new SecurityError('الجلسة مطلوبة', 'SESSION_REQUIRED');
@@ -597,3 +528,39 @@ class CreateSupportTicketUseCase extends BaseUseCase {
     return ticket;
   }
 }
+
+class GetSystemStatusUseCase {
+  constructor(orderRepo, customerRepo, productRepo, ticketRepo, logger) {
+    this.orderRepo = orderRepo;
+    this.customerRepo = customerRepo;
+    this.productRepo = productRepo;
+    this.ticketRepo = ticketRepo;
+    this.logger = logger;
+  }
+
+  execute() {
+    const orders = this.orderRepo.findAll();
+    const customers = this.customerRepo.findAll();
+    const products = this.productRepo.findAll();
+    const tickets = this.ticketRepo.findAll();
+
+    const statusCounts = {};
+    Object.keys(OrderStatus).forEach(function (k) { statusCounts[OrderStatus[k]] = 0; });
+    orders.forEach(function (o) { statusCounts[o.status] = (statusCounts[o.status] || 0) + 1; });
+
+    return {
+      counts: {
+        orders: orders.length,
+        customers: customers.length,
+        products: products.length,
+        tickets: tickets.length
+      },
+      orderStatusBreakdown: statusCounts,
+      lowStockCount: this.productRepo.findLowStock(10).length,
+      openTicketCount: tickets.filter(function (t) { return t.status === TicketStatus.OPEN; }).length,
+      systemVersion: '5.1',
+      timestamp: new Date().toISOString()
+    };
+  }
+}
+

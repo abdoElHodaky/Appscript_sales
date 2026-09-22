@@ -1,16 +1,8 @@
 /**
  * ============================================================
  * Infrastructure Layer — Search Engine
- * ------------------------------------------------------------
- *   - QueryBuilder   : fluent, validated query assembly
- *   - SearchEngine   : inverted-index full-text search + filters
- *   - ResultFormatter: shapes hits for API/HTML consumers
  * ============================================================
  */
-
-/* ------------------------------------------------------------
- * QueryBuilder — fluent, immutable-ish assembly
- * ----------------------------------------------------------*/
 
 class QueryBuilder {
   constructor() {
@@ -24,20 +16,11 @@ class QueryBuilder {
     };
   }
 
-  /**
-   * @param {string} text Free-text term.
-   * @return {QueryBuilder} this (chainable)
-   */
   text(text) {
     this.query_.text = Xss.sanitizeInput(text || '');
     return this;
   }
 
-  /**
-   * @param {string} field Filter field (status|city|customerId).
-   * @param {*} value
-   * @return {QueryBuilder}
-   */
   filter(field, value) {
     const allowed = ['status', 'city', 'customerId', 'minTotal', 'maxTotal'];
     if (allowed.indexOf(field) === -1) {
@@ -47,11 +30,6 @@ class QueryBuilder {
     return this;
   }
 
-  /**
-   * @param {string} field Sort field.
-   * @param {string} [dir] 'asc'|'desc' (default desc).
-   * @return {QueryBuilder}
-   */
   sort(field, dir) {
     const allowed = ['createdAt', 'total', 'customerName', 'status'];
     if (allowed.indexOf(field) === -1) {
@@ -62,11 +40,6 @@ class QueryBuilder {
     return this;
   }
 
-  /**
-   * @param {number} page     1-based page index.
-   * @param {number} pageSize Items per page (1–100).
-   * @return {QueryBuilder}
-   */
   paginate(page, pageSize) {
     const p = parseInt(page, 10);
     const s = parseInt(pageSize, 10);
@@ -75,39 +48,20 @@ class QueryBuilder {
     return this;
   }
 
-  /**
-   * @return {Object} Frozen query object.
-   */
   build() {
     return Object.freeze(JSON.parse(JSON.stringify(this.query_)));
   }
 }
 
-/* ------------------------------------------------------------
- * SearchEngine — inverted index over orders
- * ----------------------------------------------------------*/
-
 class SearchEngine {
-  /**
-   * @param {OrderRepository} orderRepo
-   * @param {Cache} cache     CacheService script cache.
-   * @param {Logger} logger
-   */
   constructor(orderRepo, cache, logger) {
     this.orderRepo = orderRepo;
     this.cache = cache;
     this.logger = logger;
-    /** @private {Object<string, string[]>|null} token → orderIds */
     this.index_ = null;
-    /** @private {Object<string, Order>} id → entity */
     this.docs_ = null;
   }
 
-  /**
-   * (Re)builds the inverted index from the repository.
-   * Tokenises customer name, city, status and product names.
-   * @private
-   */
   buildIndex_() {
     this.logger.startTimer('search:index');
     const orders = this.orderRepo.findAll();
@@ -133,13 +87,7 @@ class SearchEngine {
     this.logger.endTimer('search:index');
   }
 
-  /**
-   * Executes a built query.
-   * @param {Object} query From QueryBuilder.build().
-   * @return {{hits: Order[], total: number, page: number, pageSize: number, pages: number}}
-   */
   search(query) {
-    // Result caching: identical query strings reuse the previous hit list.
     const cacheKey = 'srch:' + Utilities.computeDigest(
       Utilities.DigestAlgorithm.MD5, JSON.stringify(query)
     ).map(function (b) { return (b + 256) % 256; }).join('');
@@ -154,7 +102,6 @@ class SearchEngine {
     this.buildIndex_();
     let candidates = Object.keys(this.docs_);
 
-    // Full-text phase: intersect token postings.
     if (query.text) {
       const terms = query.text.toLowerCase().split(/[^\p{L}\p{N}]+/u)
         .filter(function (t) { return t.length >= 2; });
@@ -170,7 +117,6 @@ class SearchEngine {
       }
     }
 
-    // Filter phase.
     let results = candidates.map(function (id) { return this.docs_[id]; }, this);
     const f = query.filters || {};
     if (f.status) results = results.filter(function (o) { return o.status === f.status; });
@@ -183,7 +129,6 @@ class SearchEngine {
       results = results.filter(function (o) { return o.getTotal() <= f.maxTotal; });
     }
 
-    // Sort phase.
     const dir = query.sortDir === 'asc' ? 1 : -1;
     const field = query.sortBy;
     results.sort(function (a, b) {
@@ -194,7 +139,6 @@ class SearchEngine {
       return ((av || 0) - (bv || 0)) * dir;
     });
 
-    // Pagination phase.
     const total = results.length;
     const pages = Math.max(1, Math.ceil(total / query.pageSize));
     const start = (query.page - 1) * query.pageSize;
@@ -208,7 +152,6 @@ class SearchEngine {
       pages: pages
     };
 
-    // Cache serialised hits for 5 minutes.
     const toCache = {
       hits: hits.map(function (o) { return o.toJSON(); }),
       total: total, page: query.page, pageSize: query.pageSize, pages: pages
@@ -218,15 +161,7 @@ class SearchEngine {
   }
 }
 
-/* ------------------------------------------------------------
- * ResultFormatter — API/HTML shaping
- * ----------------------------------------------------------*/
-
 const ResultFormatter = {
-  /**
-   * @param {Object} searchResult Output of SearchEngine.search().
-   * @return {Object} API-safe payload with escaped strings.
-   */
   toApi(searchResult) {
     return {
       total: searchResult.total,

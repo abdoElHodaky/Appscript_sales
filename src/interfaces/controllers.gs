@@ -1,43 +1,18 @@
 /**
  * ============================================================
  * Interface Layer — Controllers
- * ------------------------------------------------------------
- * Thin controllers: parse input → build DTO → call use case →
- * shape the response. Zero business logic here.
- *
- *   - BaseController     : success/error envelope + error mapping
- *   - OrderController    : create / updateStatus / search
- *   - DashboardController: kpi / charts / tables / alerts
- *   - PortalController   : requestOtp / verifyOtp / orders / tickets
  * ============================================================
  */
 
-/* ------------------------------------------------------------
- * BaseController
- * ----------------------------------------------------------*/
-
 class BaseController {
-  /** @param {Logger} logger */
   constructor(logger) {
     this.logger = logger;
   }
 
-  /**
-   * Standard success envelope.
-   * @protected
-   * @param {*} data
-   * @return {Object}
-   */
   ok_(data) {
     return { success: true, data: data };
   }
 
-  /**
-   * Maps typed errors to stable client codes.
-   * @protected
-   * @param {Error} err
-   * @return {Object}
-   */
   fail_(err) {
     let status = 500;
     if (err instanceof DomainError) status = err.code === 'ORDER_NOT_FOUND' ? 404 : 422;
@@ -55,12 +30,6 @@ class BaseController {
     };
   }
 
-  /**
-   * Runs a controller action inside the standard envelope.
-   * @protected
-   * @param {Function} fn () => data
-   * @return {Object}
-   */
   handle_(fn) {
     try {
       return this.ok_(fn());
@@ -70,30 +39,15 @@ class BaseController {
   }
 }
 
-/* ------------------------------------------------------------
- * OrderController
- * ----------------------------------------------------------*/
-
 class OrderController extends BaseController {
-  /**
-   * @param {CreateOrderUseCase} createOrder
-   * @param {UpdateOrderStatusUseCase} updateStatus
-   * @param {SearchOrdersUseCase} searchOrders
-   * @param {Logger} logger
-   */
-  constructor(createOrder, updateStatus, searchOrders, logger) {
+  constructor(createOrder, updateStatus, searchOrders, generateInvoice, logger) {
     super(logger);
     this.createOrder = createOrder;
     this.updateStatus = updateStatus;
     this.searchOrders = searchOrders;
+    this.generateInvoice = generateInvoice;
   }
 
-  /**
-   * POST /orders — create a new order.
-   * @param {Object} body {customerId, customerName, city, notes, items[]}
-   * @param {string} userRole
-   * @return {Object} Envelope with the created order.
-   */
   create(body, userRole) {
     return this.handle_(function () {
       Rbac.assert(userRole, 'order.create');
@@ -102,12 +56,6 @@ class OrderController extends BaseController {
     }.bind(this));
   }
 
-  /**
-   * PATCH /orders/:id/status — transition an order.
-   * @param {Object} body {orderId, newStatus, reason?}
-   * @param {string} userRole
-   * @return {Object}
-   */
   changeStatus(body, userRole) {
     return this.handle_(function () {
       Rbac.assert(userRole, 'order.update');
@@ -116,44 +64,32 @@ class OrderController extends BaseController {
     }.bind(this));
   }
 
-  /**
-   * GET /search — full-text + filters + pagination.
-   * @param {Object} params Query string parameters.
-   * @param {string} callerKey Rate-limit bucket.
-   * @return {Object}
-   */
   search(params, callerKey) {
     return this.handle_(function () {
       return this.searchOrders.execute(new SearchOrdersDTO(params), callerKey);
     }.bind(this));
   }
+
+  generateInvoice(params, body, userRole) {
+    return this.handle_(function () {
+      Rbac.assert(userRole, 'order.read');
+      const orderId = (params && params.orderId) || (body && body.orderId);
+      if (!orderId) throw new DomainError('معرّف الطلب مطلوب', 'ORDER_ID_REQUIRED');
+      return this.generateInvoice.execute(orderId);
+    }.bind(this));
+  }
 }
 
-/* ------------------------------------------------------------
- * DashboardController
- * ----------------------------------------------------------*/
-
 class DashboardController extends BaseController {
-  /**
-   * @param {CalculateKPIsUseCase} calculateKPIs
-   * @param {GenerateChartsUseCase} generateCharts
-   * @param {GenerateTablesUseCase} generateTables
-   * @param {GetAlertStatisticsUseCase} alertStats
-   * @param {Logger} logger
-   */
-  constructor(calculateKPIs, generateCharts, generateTables, alertStats, logger) {
+  constructor(calculateKPIs, generateCharts, generateTables, alertStats, systemStatus, logger) {
     super(logger);
     this.calculateKPIs = calculateKPIs;
     this.generateCharts = generateCharts;
     this.generateTables = generateTables;
     this.alertStats = alertStats;
+    this.systemStatus = systemStatus;
   }
 
-  /**
-   * Full dashboard payload in one round-trip.
-   * @param {Object} params {dateRange, customFrom, customTo, userRole, userEmail}
-   * @return {Object} {kpi, charts, tables, alerts, lastUpdated}
-   */
   getDashboardData(params) {
     return this.handle_(function () {
       const dto = new DashboardQueryDTO(params || {});
@@ -168,64 +104,42 @@ class DashboardController extends BaseController {
     }.bind(this));
   }
 
-  /** @param {Object} params @return {Object} KPI cards only. */
   getKpi(params) {
     return this.handle_(function () {
       return this.calculateKPIs.execute(new DashboardQueryDTO(params || {}));
     }.bind(this));
   }
+
+  getSystemStatus(params, userRole) {
+    return this.handle_(function () {
+      Rbac.assert(userRole, 'dashboard.view');
+      return this.systemStatus.execute();
+    }.bind(this));
+  }
 }
 
-/* ------------------------------------------------------------
- * PortalController — customer-facing (session-authenticated)
- * ----------------------------------------------------------*/
-
 class PortalController extends BaseController {
-  /**
-   * @param {AuthenticateCustomerUseCase} auth
-   * @param {CreateSupportTicketUseCase} createTicket
-   * @param {OrderRepository} orderRepo
-   * @param {TicketRepository} ticketRepo
-   * @param {SessionService} sessionService
-   * @param {Logger} logger
-   */
   constructor(auth, createTicketUseCase, orderRepo, ticketRepo, sessionService, logger) {
     super(logger);
     this.auth = auth;
-    // NB: property named *UseCase so it never shadows the createTicket() method.
     this.createTicketUseCase = createTicketUseCase;
     this.orderRepo = orderRepo;
     this.ticketRepo = ticketRepo;
     this.sessionService = sessionService;
   }
 
-  /**
-   * POST /portal/otp — step 1 of login.
-   * @param {Object} body {phone}
-   * @return {Object}
-   */
   requestOtp(body) {
     return this.handle_(function () {
       return this.auth.requestOtp(new RequestOtpDTO(body));
     }.bind(this));
   }
 
-  /**
-   * POST /portal/verify — step 2 of login; returns a session token.
-   * @param {Object} body {phone, code}
-   * @return {Object}
-   */
   verifyOtp(body) {
     return this.handle_(function () {
       return this.auth.verifyOtp(new VerifyOtpDTO(body));
     }.bind(this));
   }
 
-  /**
-   * GET /portal/orders — authenticated customer's orders.
-   * @param {string} token Session token.
-   * @return {Object}
-   */
   myOrders(token) {
     return this.handle_(function () {
       const customerId = this.sessionService.resolve(token);
@@ -239,11 +153,6 @@ class PortalController extends BaseController {
     }.bind(this));
   }
 
-  /**
-   * GET /portal/tickets — authenticated customer's tickets.
-   * @param {string} token
-   * @return {Object}
-   */
   myTickets(token) {
     return this.handle_(function () {
       const customerId = this.sessionService.resolve(token);
@@ -256,12 +165,6 @@ class PortalController extends BaseController {
     }.bind(this));
   }
 
-  /**
-   * POST /portal/tickets — open a support ticket.
-   * @param {string} token
-   * @param {Object} body {subject, message}
-   * @return {Object}
-   */
   createTicket(token, body) {
     return this.handle_(function () {
       const customerId = this.sessionService.resolve(token);
@@ -270,11 +173,6 @@ class PortalController extends BaseController {
     }.bind(this));
   }
 
-  /**
-   * POST /portal/logout.
-   * @param {string} token
-   * @return {Object}
-   */
   logout(token) {
     return this.handle_(function () {
       this.sessionService.destroy(token);

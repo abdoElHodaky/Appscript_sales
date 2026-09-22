@@ -1,36 +1,22 @@
 /**
  * ============================================================
- * Interface Layer — Web Handlers (Router)
+ * Interface Layer — Web Handlers (Router)  [v5.1]
  * ------------------------------------------------------------
- * Single entry routing for the Apps Script web app:
- *   - Router          : action → controller method dispatch
- *   - doGet / doPost  : global entry points (defined in Code.gs
- *                       and delegating here)
+ * Changes:
+ *   1. SECURITY: default role is now CUSTOMER (was ADMIN).
+ *   2. Added AppSheet sync routes.
  * ============================================================
  */
 
 class Router {
-  /**
-   * @param {Object} deps
-   * @param {DashboardController} deps.dashboard
-   * @param {OrderController} deps.order
-   * @param {PortalController} deps.portal
-   * @param {Logger} deps.logger
-   */
   constructor(deps, logger) {
     this.dashboard = deps.dashboard;
     this.order = deps.order;
     this.portal = deps.portal;
+    this.appSheet = deps.appSheet;
     this.logger = logger;
   }
 
-  /**
-   * Routes a GET request.
-   * Pages:  ?page=dashboard | ?page=portal  → HTML
-   * API:    ?action=dashboard|search|...    → JSON
-   * @param {Object} e Apps Script doGet event.
-   * @return {HtmlOutput|TextOutput}
-   */
   routeGet(e) {
     const params = (e && e.parameter) || {};
     const page = params.page;
@@ -41,11 +27,6 @@ class Router {
     return jsonResponse_(out);
   }
 
-  /**
-   * Routes a POST request. Body is JSON with an `action` field.
-   * @param {Object} e Apps Script doPost event.
-   * @return {TextOutput}
-   */
   routePost(e) {
     let body = {};
     try {
@@ -61,27 +42,18 @@ class Router {
     return jsonResponse_(out);
   }
 
-  /**
-   * Central action dispatch table.
-   * @private
-   * @param {string} action
-   * @param {Object} params Query params (GET) or body (POST).
-   * @param {Object|null} body POST body when present.
-   * @return {Object} Envelope {success, data|error}.
-   */
   dispatch_(action, params, body) {
-    const role = params.userRole || Role.ADMIN;
+    /* FIX: default to CUSTOMER instead of ADMIN */
+    const role = params.userRole || Role.CUSTOMER;
     const caller = params.userEmail || 'anonymous';
-    this.logger.info('dispatch', { action: action, caller: caller });
+    this.logger.info('dispatch', { action: action, caller: caller, role: role });
 
     switch (action) {
-      /* ---------- dashboard ---------- */
       case 'dashboard':
         return this.dashboard.getDashboardData(params);
       case 'kpi':
         return this.dashboard.getKpi(params);
 
-      /* ---------- orders ---------- */
       case 'search':
         return this.order.search(params, caller);
       case 'createOrder':
@@ -89,7 +61,6 @@ class Router {
       case 'updateStatus':
         return this.order.changeStatus(body || {}, role);
 
-      /* ---------- portal ---------- */
       case 'portal.requestOtp':
         return this.portal.requestOtp(body || {});
       case 'portal.verifyOtp':
@@ -103,6 +74,18 @@ class Router {
       case 'portal.logout':
         return this.portal.logout(params.token || (body && body.token));
 
+      /* NEW: AppSheet sync */
+      case 'appsheet.inbound':
+        return this.appSheet.inboundSync(body || {}, role);
+      case 'appsheet.outbound':
+        return this.appSheet.outboundSync(body || {}, role);
+
+      /* NEW: Invoice + System Status */
+      case 'generateInvoice':
+        return this.order.generateInvoice(params, body, role);
+      case 'system.status':
+        return this.dashboard.getSystemStatus(params, role);
+
       default:
         return {
           success: false,
@@ -112,12 +95,6 @@ class Router {
   }
 }
 
-/**
- * Wraps a payload in a JSON TextOutput.
- * @private
- * @param {Object} payload
- * @return {TextOutput}
- */
 function jsonResponse_(payload) {
   return ContentService
     .createTextOutput(JSON.stringify(payload))

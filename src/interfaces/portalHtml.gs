@@ -1,149 +1,235 @@
 /**
  * ============================================================
- * Interface Layer — Customer Portal Page (HTML)
- * ------------------------------------------------------------
- * Password-less customer portal:
- *   1) phone → OTP   2) OTP → session token
- *   3) orders list   4) support tickets + create
- * RTL, responsive, dark mode, XSS-safe (textContent only).
+ * Interface Layer — Customer Portal HTML Page
  * ============================================================
  */
 
-/**
- * @return {HtmlOutput} The rendered portal page.
- */
 function renderPortalPage() {
-  return HtmlService.createHtmlOutput(PORTAL_HTML_)
-    .setTitle('بوابة العملاء')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  const html = `
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>بوابة العميل — نظام المبيعات</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',Tahoma,sans-serif}
+body{background:#f5f7fa;color:#333;line-height:1.6}
+.container{max-width:600px;margin:0 auto;padding:20px}
+.card{background:#fff;padding:24px;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,0.08);margin-bottom:16px}
+.card h2{font-size:20px;margin-bottom:16px;color:#444}
+input,textarea{width:100%;padding:12px 14px;border:1px solid #ddd;border-radius:8px;font-size:15px;margin-bottom:12px}
+input:focus,textarea:focus{outline:none;border-color:#667eea}
+.btn{width:100%;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;border:none;padding:14px;border-radius:8px;cursor:pointer;font-size:16px;transition:opacity 0.2s}
+.btn:hover{opacity:0.9}
+.btn-secondary{background:#f5f5f5;color:#555;border:1px solid #ddd}
+.otp-display{font-size:32px;letter-spacing:8px;text-align:center;padding:20px;background:#f8f9fa;border-radius:8px;margin:16px 0;color:#667eea;font-weight:700}
+.order-card{background:#f8f9fa;padding:16px;border-radius:8px;margin-bottom:12px;border-right:4px solid #667eea}
+.order-card .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.order-card .total{font-size:20px;font-weight:700;color:#667eea}
+.status-badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600}
+.status-جديد{background:#e3f2fd;color:#1976d2}
+.status-قيد-التنفيذ{background:#fff3e0;color:#f57c00}
+.status-تم-الشحن{background:#e8f5e9;color:#388e3c}
+.status-مكتمل{background:#e8f5e9;color:#2e7d32}
+.status-ملغي{background:#ffebee;color:#c62828}
+.hidden{display:none}
+#step-login{}#step-verify{}#step-dashboard{display:none}
+.nav{display:flex;gap:8px;margin-bottom:16px}
+.nav button{flex:1;padding:10px;background:#fff;border:1px solid #ddd;border-radius:8px;cursor:pointer}
+.nav button.active{background:#667eea;color:#fff;border-color:#667eea}
+.ticket-card{background:#fff3e0;padding:12px;border-radius:8px;margin-bottom:8px;border-right:4px solid #f57c00}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="card" id="step-login">
+    <h2>🔐 تسجيل الدخول</h2>
+    <p style="margin-bottom:16px;color:#666">أدخل رقم جوالك لاستلام رمز التحقق</p>
+    <input type="tel" id="phone" placeholder="05xxxxxxxx" maxlength="10">
+    <button class="btn" onclick="requestOtp()">إرسال الرمز</button>
+    <div id="otp-section" class="hidden">
+      <p style="margin:16px 0 8px">أدخل الرمز المكون من 6 أرقام:</p>
+      <input type="text" id="otp-code" placeholder="123456" maxlength="6">
+      <button class="btn" onclick="verifyOtp()">تحقق</button>
+    </div>
+    <div id="login-error" style="color:#c62828;margin-top:12px"></div>
+  </div>
+
+  <div id="step-dashboard" class="hidden">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2>👋 مرحباً <span id="customer-name"></span></h2>
+        <button class="btn btn-secondary" style="width:auto;padding:8px 16px" onclick="logout()">خروج</button>
+      </div>
+      <div class="nav">
+        <button class="active" onclick="showTab('orders')">طلباتي</button>
+        <button onclick="showTab('tickets')">التذاكر</button>
+        <button onclick="showTab('new-ticket')">تذكرة جديدة</button>
+      </div>
+    </div>
+
+    <div id="tab-orders" class="card">
+      <h2>📦 طلباتي</h2>
+      <div id="orders-list">جاري التحميل...</div>
+    </div>
+
+    <div id="tab-tickets" class="card hidden">
+      <h2>🎫 تذاكر الدعم</h2>
+      <div id="tickets-list">جاري التحميل...</div>
+    </div>
+
+    <div id="tab-new-ticket" class="card hidden">
+      <h2>✉️ تذكرة جديدة</h2>
+      <input type="text" id="ticket-subject" placeholder="الموضوع">
+      <textarea id="ticket-message" rows="4" placeholder="وصف المشكلة..."></textarea>
+      <button class="btn" onclick="createTicket()">إرسال التذكرة</button>
+      <div id="ticket-msg" style="margin-top:12px"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API_URL = window.location.href.split('?')[0];
+let token = localStorage.getItem('portal_token');
+let customerId = null;
+
+if (token) loadDashboard();
+
+async function requestOtp() {
+  const phone = document.getElementById('phone').value.trim();
+  if (!phone.match(/^05\d{8}$/)) {
+    document.getElementById('login-error').textContent = 'رقم جوال غير صالح';
+    return;
+  }
+  try {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'portal.requestOtp', phone: phone })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error?.message);
+    document.getElementById('otp-section').classList.remove('hidden');
+    document.getElementById('login-error').textContent = '';
+  } catch (e) {
+    document.getElementById('login-error').textContent = e.message;
+  }
 }
 
-/** @private page markup (constant — no template evaluation). */
-const PORTAL_HTML_ = '<!DOCTYPE html>' +
-'<html lang="ar" dir="rtl"><head><meta charset="UTF-8">' +
-'<style>' +
-':root{--bg:#f4f6fb;--card:#fff;--text:#1a1f36;--muted:#6b7280;--accent:#059669;--border:#e5e7eb}' +
-'body.dark{--bg:#0f172a;--card:#1e293b;--text:#e2e8f0;--muted:#94a3b8;--border:#334155}' +
-'*{box-sizing:border-box;margin:0;padding:0;font-family:Tahoma,Arial,sans-serif}' +
-'body{background:var(--bg);color:var(--text);min-height:100vh;padding:16px}' +
-'.wrap{max-width:760px;margin:0 auto}' +
-'.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:14px}' +
-'h1{font-size:20px;margin-bottom:14px}' +
-'h2{font-size:15px;margin-bottom:10px;color:var(--muted)}' +
-'input,textarea,button{width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:14px;margin-bottom:10px;background:var(--card);color:var(--text)}' +
-'button{background:var(--accent);color:#fff;border-color:var(--accent);cursor:pointer;font-weight:bold}' +
-'button.link{background:none;color:var(--accent);border:none;width:auto;padding:4px}' +
-'.row{display:flex;justify-content:space-between;align-items:center}' +
-'.msg{font-size:13px;margin-bottom:10px;min-height:18px}' +
-'.msg.err{color:#dc2626}.msg.ok{color:#059669}' +
-'table{width:100%;border-collapse:collapse;font-size:13px}' +
-'th,td{padding:8px;border-bottom:1px solid var(--border);text-align:right}' +
-'th{color:var(--muted);font-weight:normal}' +
-'.hidden{display:none}' +
-'.pill{padding:2px 10px;border-radius:12px;font-size:11px;background:#d1fae5;color:#065f46}' +
-'</style></head><body><div class="wrap">' +
-'<div class="row"><h1>🛍️ بوابة العملاء</h1><button class="link" onclick="document.body.classList.toggle(\'dark\')">🌙</button></div>' +
+async function verifyOtp() {
+  const phone = document.getElementById('phone').value.trim();
+  const code = document.getElementById('otp-code').value.trim();
+  try {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'portal.verifyOtp', phone: phone, code: code })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error?.message);
+    token = data.data.token;
+    localStorage.setItem('portal_token', token);
+    loadDashboard();
+  } catch (e) {
+    document.getElementById('login-error').textContent = e.message;
+  }
+}
 
-/* ---------- step 1: phone ---------- */
-'<div class="card" id="stepPhone">' +
-'<h2>تسجيل الدخول برقم الجوال</h2>' +
-'<div class="msg" id="msgPhone"></div>' +
-'<input id="phone" type="tel" placeholder="05xxxxxxxx" dir="ltr">' +
-'<button onclick="requestOtp()">إرسال رمز التحقق</button>' +
-'</div>' +
+async function loadDashboard() {
+  document.getElementById('step-login').classList.add('hidden');
+  document.getElementById('step-dashboard').classList.remove('hidden');
+  fetchOrders();
+}
 
-/* ---------- step 2: otp ---------- */
-'<div class="card hidden" id="stepOtp">' +
-'<h2>أدخل رمز التحقق (6 أرقام)</h2>' +
-'<div class="msg" id="msgOtp"></div>' +
-'<input id="code" type="text" inputmode="numeric" maxlength="6" placeholder="______" dir="ltr">' +
-'<button onclick="verifyOtp()">تأكيد الدخول</button>' +
-'</div>' +
+async function fetchOrders() {
+  try {
+    const res = await fetch(API_URL + '?action=portal.orders&token=' + encodeURIComponent(token));
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error?.message);
+    const list = document.getElementById('orders-list');
+    if (!data.data || !data.data.length) {
+      list.innerHTML = '<p>لا توجد طلبات</p>';
+      return;
+    }
+    list.innerHTML = data.data.map(o => `
+      <div class="order-card">
+        <div class="header">
+          <span>طلب #${o.id}</span>
+          <span class="status-badge status-${o.status.replace(/\s/g,'-')}">${o.status}</span>
+        </div>
+        <div class="total">${o.totalFormatted}</div>
+        <div style="color:#888;font-size:13px">${o.createdAtFormatted}</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    document.getElementById('orders-list').innerHTML = '<p style="color:#c62828">' + e.message + '</p>';
+  }
+}
 
-/* ---------- step 3: account ---------- */
-'<div id="account" class="hidden">' +
-'<div class="card"><div class="row"><h2 id="welcome"></h2><button class="link" onclick="logout()">خروج</button></div></div>' +
-'<div class="card"><h2>📦 طلباتي</h2><table id="orders"></table></div>' +
-'<div class="card"><h2>🎫 تذاكر الدعم</h2><table id="tickets"></table>' +
-'<h2 style="margin-top:14px">فتح تذكرة جديدة</h2>' +
-'<div class="msg" id="msgTicket"></div>' +
-'<input id="tSubject" placeholder="الموضوع (5 أحرف على الأقل)">' +
-'<textarea id="tMessage" rows="3" placeholder="اشرح المشكلة..."></textarea>' +
-'<button onclick="createTicket()">إرسال التذكرة</button></div>' +
-'</div>' +
+async function fetchTickets() {
+  try {
+    const res = await fetch(API_URL + '?action=portal.tickets&token=' + encodeURIComponent(token));
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error?.message);
+    const list = document.getElementById('tickets-list');
+    if (!data.data || !data.data.length) {
+      list.innerHTML = '<p>لا توجد تذاكر</p>';
+      return;
+    }
+    list.innerHTML = data.data.map(t => `
+      <div class="ticket-card">
+        <strong>${t.subject}</strong>
+        <div style="color:#888;font-size:13px;margin-top:4px">${t.status} — ${t.createdAtFormatted}</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    document.getElementById('tickets-list').innerHTML = '<p style="color:#c62828">' + e.message + '</p>';
+  }
+}
 
-'</div>' +
-'<script>' +
-'var token=localStorage.getItem("portal_token")||"";' +
-'var phone="";' +
-'function el(t,x){var e=document.createElement(t);e.textContent=x==null?"":x;return e;}' +
-'function show(id){document.getElementById(id).classList.remove("hidden");}' +
-'function hide(id){document.getElementById(id).classList.add("hidden");}' +
-'function msg(id,text,ok){var m=document.getElementById(id);m.textContent=text;m.className="msg "+(ok?"ok":"err");}' +
-'function post(body,cb){' +
-' var x=new XMLHttpRequest();x.open("POST",location.pathname,true);' +
-' x.setRequestHeader("Content-Type","text/plain;charset=utf-8");' +
-' x.onreadystatechange=function(){if(x.readyState===4){try{cb(JSON.parse(x.responseText));}catch(e){cb({success:false,error:{message:"خطأ في الاتصال"}});}}};' +
-' x.send(JSON.stringify(body));' +
-'}' +
-'function requestOtp(){' +
-' phone=document.getElementById("phone").value.trim();' +
-' msg("msgPhone","جارٍ الإرسال...",true);' +
-' post({action:"portal.requestOtp",phone:phone},function(res){' +
-'  if(!res.success){msg("msgPhone",res.error.message);return;}' +
-'  msg("msgPhone","تم إرسال الرمز",true);show("stepOtp");' +
-'  if(res.data.devCode)msg("msgPhone","وضع التطوير — الرمز: "+res.data.devCode,true);' +
-' });' +
-'}' +
-'function verifyOtp(){' +
-' post({action:"portal.verifyOtp",phone:phone,code:document.getElementById("code").value.trim()},function(res){' +
-'  if(!res.success){msg("msgOtp",res.error.message);return;}' +
-'  token=res.data.token;localStorage.setItem("portal_token",token);' +
-'  enterAccount(res.data.customer);' +
-' });' +
-'}' +
-'function enterAccount(c){' +
-' hide("stepPhone");hide("stepOtp");show("account");' +
-' document.getElementById("welcome").textContent="مرحباً "+c.name;' +
-' loadOrders();loadTickets();' +
-'}' +
-'function loadOrders(){' +
-' post({action:"portal.orders",token:token},function(res){' +
-'  var t=document.getElementById("orders");t.innerHTML="";' +
-'  var h=document.createElement("tr");["الطلب","الإجمالي","الحالة","التاريخ"].forEach(function(x){h.appendChild(el("th",x));});t.appendChild(h);' +
-'  if(!res.success)return;' +
-'  res.data.forEach(function(o){var tr=document.createElement("tr");' +
-'   [o.id,o.totalFormatted,o.status,o.createdAtFormatted].forEach(function(v){tr.appendChild(el("td",v));});' +
-'   t.appendChild(tr);});' +
-' });' +
-'}' +
-'function loadTickets(){' +
-' post({action:"portal.tickets",token:token},function(res){' +
-'  var t=document.getElementById("tickets");t.innerHTML="";' +
-'  var h=document.createElement("tr");["الموضوع","الحالة","التاريخ"].forEach(function(x){h.appendChild(el("th",x));});t.appendChild(h);' +
-'  if(!res.success)return;' +
-'  res.data.forEach(function(k){var tr=document.createElement("tr");' +
-'   [k.subject,k.status,k.createdAtFormatted].forEach(function(v){tr.appendChild(el("td",v));});' +
-'   t.appendChild(tr);});' +
-' });' +
-'}' +
-'function createTicket(){' +
-' post({action:"portal.createTicket",token:token,' +
-'  subject:document.getElementById("tSubject").value,' +
-'  message:document.getElementById("tMessage").value},function(res){' +
-'  if(!res.success){msg("msgTicket",res.error.message);return;}' +
-'  msg("msgTicket","تم فتح التذكرة "+res.data.id,true);' +
-'  document.getElementById("tSubject").value="";document.getElementById("tMessage").value="";' +
-'  loadTickets();' +
-' });' +
-'}' +
-'function logout(){' +
-' post({action:"portal.logout",token:token},function(){' +
-'  localStorage.removeItem("portal_token");location.reload();' +
-' });' +
-'}' +
-'if(token){post({action:"portal.orders",token:token},function(res){' +
-' if(res.success){enterAccount({name:"عميلنا الكريم"});}else{localStorage.removeItem("portal_token");}' +
-'});}' +
-'<\/script></body></html>';
+async function createTicket() {
+  const subject = document.getElementById('ticket-subject').value.trim();
+  const message = document.getElementById('ticket-message').value.trim();
+  if (!subject || !message) {
+    document.getElementById('ticket-msg').textContent = 'جميع الحقول مطلوبة';
+    return;
+  }
+  try {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'portal.createTicket', token: token, subject: subject, message: message })
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error?.message);
+    document.getElementById('ticket-subject').value = '';
+    document.getElementById('ticket-message').value = '';
+    document.getElementById('ticket-msg').textContent = 'تم إرسال التذكرة بنجاح ✅';
+    document.getElementById('ticket-msg').style.color = '#2e7d32';
+    showTab('tickets');
+    fetchTickets();
+  } catch (e) {
+    document.getElementById('ticket-msg').textContent = e.message;
+    document.getElementById('ticket-msg').style.color = '#c62828';
+  }
+}
+
+function showTab(tab) {
+  ['orders','tickets','new-ticket'].forEach(t => {
+    document.getElementById('tab-' + t).classList.add('hidden');
+  });
+  document.getElementById('tab-' + tab).classList.remove('hidden');
+  document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  if (tab === 'tickets') fetchTickets();
+}
+
+function logout() {
+  fetch(API_URL + '?action=portal.logout&token=' + encodeURIComponent(token));
+  localStorage.removeItem('portal_token');
+  token = null;
+  location.reload();
+}
+</script>
+</body>
+</html>`;
+  return HtmlService.createHtmlOutput(html).setTitle('بوابة العميل');
+}

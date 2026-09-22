@@ -1,33 +1,14 @@
 /**
  * ============================================================
  * Application Layer — DTOs
- * ------------------------------------------------------------
- * Every piece of external input crosses the boundary through a
- * DTO with schema validation. Controllers never touch raw input.
- *
- *   - BaseDTO                 : validation toolkit
- *   - CreateOrderDTO          : new order payload
- *   - UpdateOrderStatusDTO    : status transition request
- *   - SearchOrdersDTO         : search parameters
- *   - DashboardQueryDTO       : dashboard filters
- *   - RequestOtpDTO           : OTP issuance
- *   - VerifyOtpDTO            : OTP verification
- *   - CreateTicketDTO         : support ticket payload
- *   - CreateCustomerDTO       : customer registration
  * ============================================================
  */
 
-/* ------------------------------------------------------------
- * BaseDTO — shared validation toolkit
- * ----------------------------------------------------------*/
-
 class BaseDTO {
   constructor() {
-    /** @protected {string[]} accumulated validation errors */
     this.errors_ = [];
   }
 
-  /** @protected */
   require_(field, value, minLen) {
     const s = value == null ? '' : String(value).trim();
     if (!s || s.length < (minLen || 1)) {
@@ -37,12 +18,10 @@ class BaseDTO {
     return s;
   }
 
-  /** @protected */
   optional_(value, fallback) {
     return value == null || value === '' ? (fallback || '') : String(value).trim();
   }
 
-  /** @protected */
   requirePositiveInt_(field, value) {
     const n = Number(value);
     if (!Number.isInteger(n) || n <= 0) {
@@ -52,7 +31,6 @@ class BaseDTO {
     return n;
   }
 
-  /** @protected */
   requireNonNegativeNumber_(field, value) {
     const n = Number(value);
     if (typeof n !== 'number' || isNaN(n) || n < 0) {
@@ -62,7 +40,6 @@ class BaseDTO {
     return n;
   }
 
-  /** @protected */
   requireEnum_(field, value, allowed) {
     const s = String(value || '');
     if (allowed.indexOf(s) === -1) {
@@ -72,7 +49,6 @@ class BaseDTO {
     return s;
   }
 
-  /** @protected */
   requirePhone_(field, value) {
     const s = this.require_(field, value, 7);
     if (s && !/^[+0-9][0-9\s-]{6,14}$/.test(s)) {
@@ -81,29 +57,16 @@ class BaseDTO {
     return s;
   }
 
-  /**
-   * @return {boolean} True when no validation errors accumulated.
-   */
   isValid() {
     return this.errors_.length === 0;
   }
 
-  /**
-   * @return {string[]} Validation error list (empty when valid).
-   */
   getErrors() {
     return this.errors_.slice();
   }
 }
 
-/* ------------------------------------------------------------
- * CreateOrderDTO
- * ----------------------------------------------------------*/
-
 class CreateOrderDTO extends BaseDTO {
-  /**
-   * @param {Object} data Raw input {customerId, customerName, city, notes, items[]}
-   */
   constructor(data) {
     super();
     const d = data || {};
@@ -129,14 +92,7 @@ class CreateOrderDTO extends BaseDTO {
   }
 }
 
-/* ------------------------------------------------------------
- * UpdateOrderStatusDTO
- * ----------------------------------------------------------*/
-
 class UpdateOrderStatusDTO extends BaseDTO {
-  /**
-   * @param {Object} data {orderId, newStatus}
-   */
   constructor(data) {
     super();
     const d = data || {};
@@ -149,14 +105,7 @@ class UpdateOrderStatusDTO extends BaseDTO {
   }
 }
 
-/* ------------------------------------------------------------
- * SearchOrdersDTO
- * ----------------------------------------------------------*/
-
 class SearchOrdersDTO extends BaseDTO {
-  /**
-   * @param {Object} data {text, status, city, customerId, sortBy, sortDir, page, pageSize}
-   */
   constructor(data) {
     super();
     const d = data || {};
@@ -176,14 +125,7 @@ class SearchOrdersDTO extends BaseDTO {
   }
 }
 
-/* ------------------------------------------------------------
- * DashboardQueryDTO
- * ----------------------------------------------------------*/
-
 class DashboardQueryDTO extends BaseDTO {
-  /**
-   * @param {Object} data {dateRange, customFrom, customTo, userRole, userEmail}
-   */
   constructor(data) {
     super();
     const d = data || {};
@@ -200,12 +142,7 @@ class DashboardQueryDTO extends BaseDTO {
   }
 }
 
-/* ------------------------------------------------------------
- * RequestOtpDTO
- * ----------------------------------------------------------*/
-
 class RequestOtpDTO extends BaseDTO {
-  /** @param {Object} data {phone} */
   constructor(data) {
     super();
     const d = data || {};
@@ -213,12 +150,7 @@ class RequestOtpDTO extends BaseDTO {
   }
 }
 
-/* ------------------------------------------------------------
- * VerifyOtpDTO
- * ----------------------------------------------------------*/
-
 class VerifyOtpDTO extends BaseDTO {
-  /** @param {Object} data {phone, code} */
   constructor(data) {
     super();
     const d = data || {};
@@ -230,12 +162,7 @@ class VerifyOtpDTO extends BaseDTO {
   }
 }
 
-/* ------------------------------------------------------------
- * CreateTicketDTO
- * ----------------------------------------------------------*/
-
 class CreateTicketDTO extends BaseDTO {
-  /** @param {Object} data {subject, message} (customerId from session) */
   constructor(data) {
     super();
     const d = data || {};
@@ -244,12 +171,7 @@ class CreateTicketDTO extends BaseDTO {
   }
 }
 
-/* ------------------------------------------------------------
- * CreateCustomerDTO
- * ----------------------------------------------------------*/
-
 class CreateCustomerDTO extends BaseDTO {
-  /** @param {Object} data {name, phone, email, city} */
   constructor(data) {
     super();
     const d = data || {};

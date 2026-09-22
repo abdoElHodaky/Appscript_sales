@@ -10,12 +10,7 @@
  * ============================================================
  */
 
-/** Typed security violation (mapped to 401/403 by controllers). */
 class SecurityError extends Error {
-  /**
-   * @param {string} message
-   * @param {string} [code] e.g. 'FORBIDDEN', 'RATE_LIMITED'.
-   */
   constructor(message, code) {
     super(message);
     this.name = 'SecurityError';
@@ -23,11 +18,6 @@ class SecurityError extends Error {
   }
 }
 
-/* ------------------------------------------------------------
- * Roles & RBAC
- * ----------------------------------------------------------*/
-
-/** @enum {string} System roles. */
 const Role = Object.freeze({
   ADMIN: 'ADMIN',
   MANAGER: 'MANAGER',
@@ -35,10 +25,6 @@ const Role = Object.freeze({
   CUSTOMER: 'CUSTOMER'
 });
 
-/**
- * Rbac — static permission matrix.
- * Permissions use the form 'resource.action'.
- */
 const Rbac = {
   matrix: Object.freeze({
     [Role.ADMIN]: Object.freeze([
@@ -57,22 +43,11 @@ const Rbac = {
     ])
   }),
 
-  /**
-   * @param {string} role
-   * @param {string} permission 'resource.action'
-   * @return {boolean}
-   */
   allows(role, permission) {
     const list = this.matrix[role] || [];
     return list.indexOf(permission) !== -1;
   },
 
-  /**
-   * Asserts permission or throws SecurityError.
-   * @param {string} role
-   * @param {string} permission
-   * @throws {SecurityError}
-   */
   assert(role, permission) {
     if (!this.allows(role, permission)) {
       throw new SecurityError(
@@ -83,27 +58,12 @@ const Rbac = {
   }
 };
 
-/* ------------------------------------------------------------
- * RateLimiter — fixed-window over CacheService
- * ----------------------------------------------------------*/
-
 class RateLimiter {
-  /**
-   * @param {Cache} cache   CacheService instance (script cache).
-   * @param {Logger} logger
-   */
   constructor(cache, logger) {
     this.cache = cache;
     this.logger = logger;
   }
 
-  /**
-   * Checks & records a hit. Throws when the window is exhausted.
-   * @param {string} key        Unique bucket, e.g. 'otp:9665xxxx'.
-   * @param {number} maxHits    Allowed hits inside the window.
-   * @param {number} windowSec  Window length in seconds (≤ 21600).
-   * @throws {SecurityError} When limit exceeded.
-   */
   assertWithinLimit(key, maxHits, windowSec) {
     const cacheKey = 'rl:' + key;
     const raw = this.cache.get(cacheKey);
@@ -115,32 +75,16 @@ class RateLimiter {
         'RATE_LIMITED'
       );
     }
-    // CacheService has no increment; put is atomic enough at this scale.
     this.cache.put(cacheKey, String(hits + 1), windowSec);
   }
 
-  /**
-   * Read-only check.
-   * @param {string} key
-   * @param {number} maxHits
-   * @return {boolean} True when more hits are allowed.
-   */
   isAllowed(key, maxHits) {
     const raw = this.cache.get('rl:' + key);
     return raw ? parseInt(raw, 10) < maxHits : true;
   }
 }
 
-/* ------------------------------------------------------------
- * Xss — escaping & sanitisation
- * ----------------------------------------------------------*/
-
 const Xss = {
-  /**
-   * Escapes a value for safe interpolation into HTML.
-   * @param {*} text
-   * @return {string}
-   */
   escapeHtml(text) {
     return String(text == null ? '' : text)
       .replace(/&/g, '&amp;')
@@ -150,12 +94,6 @@ const Xss = {
       .replace(/'/g, '&#39;');
   },
 
-  /**
-   * Strips dangerous constructs from user input before storage.
-   * Removes angle brackets, javascript: URIs and inline handlers.
-   * @param {*} text
-   * @return {string}
-   */
   sanitizeInput(text) {
     return String(text == null ? '' : text)
       .replace(/[<>]/g, '')
@@ -164,11 +102,6 @@ const Xss = {
       .trim();
   },
 
-  /**
-   * Escapes every string value in a plain object (shallow).
-   * @param {Object} obj
-   * @return {Object}
-   */
   escapeObject(obj) {
     const out = {};
     for (const k in obj) {

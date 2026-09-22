@@ -10,15 +10,7 @@
  * ============================================================
  */
 
-/* ------------------------------------------------------------
- * IdGenerator
- * ----------------------------------------------------------*/
-
 const IdGenerator = {
-  /**
-   * @param {string} prefix e.g. 'ORD', 'CUST', 'TKT', 'INV'.
-   * @return {string} e.g. 'ORD-2026-A1B2C3'.
-   */
   next(prefix) {
     const year = new Date().getFullYear();
     const rand = Utilities.getUuid().replace(/-/g, '').substring(0, 6).toUpperCase();
@@ -26,12 +18,7 @@ const IdGenerator = {
   }
 };
 
-/* ------------------------------------------------------------
- * DateRange — named ranges to concrete {from, to}
- * ----------------------------------------------------------*/
-
 const DateRange = {
-  /** @enum {string} Supported named ranges. */
   Names: Object.freeze({
     TODAY: 'TODAY',
     THIS_WEEK: 'THIS_WEEK',
@@ -40,12 +27,6 @@ const DateRange = {
     CUSTOM: 'CUSTOM'
   }),
 
-  /**
-   * Resolves a named range to concrete dates.
-   * @param {string} name    One of DateRange.Names.
-   * @param {Object} [custom] {from: Date|string, to: Date|string} for CUSTOM.
-   * @return {{from: Date, to: Date}}
-   */
   resolve(name, custom) {
     const now = new Date();
     const endOfDay = function (d) {
@@ -82,16 +63,7 @@ const DateRange = {
   }
 };
 
-/* ------------------------------------------------------------
- * Formatter — presentation-safe formatting
- * ----------------------------------------------------------*/
-
 const Formatter = {
-  /**
-   * @param {number} amount
-   * @param {string} [currency] ISO code, default 'SAR'.
-   * @return {string} e.g. '1,250.00 ر.س'
-   */
   currency(amount, currency) {
     const n = Number(amount) || 0;
     const symbol = (currency === 'USD') ? '$' : 'ر.س';
@@ -102,30 +74,16 @@ const Formatter = {
     return currency === 'USD' ? symbol + formatted : formatted + ' ' + symbol;
   },
 
-  /**
-   * @param {number} n
-   * @return {string} e.g. '12,345'
-   */
   number(n) {
     return (Number(n) || 0).toLocaleString('en-US');
   },
 
-  /**
-   * Masks a phone number for logs: +9665****1234
-   * @param {string} phone
-   * @return {string}
-   */
   maskPhone(phone) {
     const p = String(phone || '');
     if (p.length <= 7) return '****';
     return p.substring(0, 5) + '****' + p.substring(p.length - 4);
   },
 
-  /**
-   * ISO date → 'YYYY-MM-DD HH:mm' in script timezone.
-   * @param {Date|string} d
-   * @return {string}
-   */
   dateTime(d) {
     if (!d) return '';
     const date = new Date(d);
@@ -133,33 +91,16 @@ const Formatter = {
   }
 };
 
-/* ------------------------------------------------------------
- * EventBus — lightweight in-process pub/sub
- * ----------------------------------------------------------*/
-
 class EventBus {
   constructor() {
-    /** @private {Object<string, Function[]>} */
     this.handlers_ = {};
   }
 
-  /**
-   * Registers a handler for an event name.
-   * @param {string} eventName e.g. 'order.created'.
-   * @param {Function} handler Receives the payload object.
-   */
   subscribe(eventName, handler) {
     if (!this.handlers_[eventName]) this.handlers_[eventName] = [];
     this.handlers_[eventName].push(handler);
   }
 
-  /**
-   * Fires all handlers registered for an event. Handler errors
-   * are swallowed into console so one bad listener never breaks
-   * the publishing use case.
-   * @param {string} eventName
-   * @param {Object} [payload]
-   */
   publish(eventName, payload) {
     const list = this.handlers_[eventName] || [];
     for (let i = 0; i < list.length; i++) {

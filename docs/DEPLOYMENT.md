@@ -18,15 +18,7 @@ clasp login
 ## 2) إنشاء المشروع وربطه بجدول بيانات
 
 ```bash
-# من داخل مجلد المشروع بعد فك الضغط
-clasp create --title "Sales System v5" --type sheets
-```
-
-ينشئ هذا `.clasp.json` يحوي `scriptId`. إن كان لديك مشروع موجود:
-
-```json
-// .clasp.json
-{ "scriptId": "YOUR_SCRIPT_ID", "rootDir": "." }
+clasp create --title "Sales System v5.1" --type sheets
 ```
 
 ## 3) رفع الملفات
@@ -35,89 +27,58 @@ clasp create --title "Sales System v5" --type sheets
 clasp push
 ```
 
-> ملاحظة: clasp يدعم المجلدات المتداخلة — ستظهر الملفات في المحرر
-> بأسماء مثل `src/domain/entities`.
-
 ## 4) التهيئة الأولى
 
 ```bash
 clasp run initializeSystem
 ```
 
-تقوم بـ:
+آمنة لإعادة التشغيل — تزيل الترiggers المكررة وتتجنب تسجيل listeners مكررة. تقوم بـ:
 - إنشاء الأوراق: `orders`, `customers`, `products`, `support_tickets`
-- بذر بيانات تجريبية (4 عملاء، 4 منتجات، 40 طلب موزعة على 30 يوم)
-- تثبيت Trigger زمني: `runAlertEvaluation` كل ساعة
-
-لإعادة البذر: احذف محتوى ورقة `orders` ثم أعد التشغيل (التهيئة idempotent).
+- إنشاء أوراق AppSheet: `app_orders`, `app_customers`
+- بذر بيانات تجريبية (4 عملاء، 4 منتجات، 40 طلب)
+- تثبيت Triggers: `runAlertEvaluation` كل ساعة + `runAppSheetSync` كل 5 دقائق
 
 ## 5) الاختبارات
 
 ```bash
 clasp run runTests
-# → { total: 26, passed: 26, failed: 0 }
+# → { total: 30, passed: 30, failed: 0 }
 ```
 
 ## 6) النشر كـ Web App
 
 ```bash
-clasp deploy -d "v5.0 Production"
+clasp deploy -d "v5.1 Production"
 ```
 
 أو من المحرر: **Deploy → New deployment → Web app**:
 - Execute as: **Me**
-- Who has access: حسب الحاجة (`Anyone` للبوابة العامة)
+- Who has access: حسب الحاجة
 
-الروابط الناتجة:
+## 7) ربط AppSheet
 
-| الصفحة | الرابط |
-|---|---|
-| لوحة التحكم | `.../exec?page=dashboard` |
-| بوابة العملاء | `.../exec?page=portal` |
-| API JSON | `.../exec?action=dashboard&dateRange=THIS_MONTH` |
-
-## 7) ما بعد النشر
-
-### ربط SMS لإرسال OTP (إنتاج حقيقي)
-
-حالياً يعمل OTP بوضع التطوير (`devCode` يُرجع في الاستجابة). للإنتاج:
-
-1. في `otpService.gs` دالة `issue()` أضف إرسال SMS عبر مزودك:
-
-```javascript
-UrlFetchApp.fetch('https://sms-provider.example/send', {
-  method: 'post',
-  contentType: 'application/json',
-  payload: JSON.stringify({ to: phone, text: 'رمز الدخول: ' + code })
-});
-```
-
-2. احذف `devCode` من الاستجابة.
-
-### قفل لوحة التحكم
-
-الوصول الحالي يعتمد على `userRole` المرسل. للإنتاج اربطه بـ
-`Session.getActiveUser().getEmail()` + قائمة بيضاء في `security.gs`.
-
-### النطاقات (Scopes) المستخدمة
-
-موجودة في `appsscript.json` — أضف نطاقات المزود الخارجي عند ربط SMS.
+1. أنشئ تطبيق AppSheet جديد
+2. اربطه بجدول `app_orders` (وليس `orders`)
+3. عمود `sync_source` يميّز التعديلات الواردة
+4. عند تعديل حالة طلب في AppSheet:
+   - اترك `sync_source` فارغاً أو اكتب `appsheet`
+   - Trigger كل 5 دقائق يقرأ ويطبق التغييرات
 
 ## استكشاف الأخطاء
 
 | المشكلة | الحل |
 |---|---|
-| `Script function not found` | تأكد أن `clasp push` رفع كل الملفات، وأعد النشر |
-| صفحة بيضاء | افتح Executions في المحرر — غالباً خطأ في صلاحيات النشر |
-| `Spreadsheet not found` | شغّل `initializeSystem` من المحرر مرة واحدة يدوياً لتفويض الصلاحيات |
-| التنبيهات لا تصل | تحقق من Triggers في المحرر، ومن بريد المالك الفعلي للسكربت |
-| `Rate limited` على البحث | الحد 30 بحث/5 دقائق لكل مستخدم — ارفعه في `SearchOrdersUseCase` |
+| `Script function not found` | تأكد من `clasp push` وأعد النشر |
+| صفحة بيضاء | افتح Executions في المحرر |
+| `Spreadsheet not found` | شغّل `initializeSystem` يدوياً |
+| التنبيهات لا تصل | تحقق من Triggers وبريد المالك |
+| `Rate limited` | الحد 30 بحث/5 دقائق |
+| AppSheet لا يتزامن | تأكد من أن `sync_source` ليس `system` |
 
 ## التحديثات اللاحقة
 
 ```bash
-# تعديل الكود ثم:
 clasp push
-clasp deploy -d "v5.1 description"   # نسخة جديدة
-# أو تحديث النشر الحالي من المحرر: Deploy → Manage deployments → Edit
+clasp deploy -d "v5.2 description"
 ```
