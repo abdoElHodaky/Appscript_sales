@@ -75,10 +75,10 @@ function seedIfEmpty_(c) {
   customers.forEach(function (cu) { customerRepo.save(cu); });
 
   [
-    { id: 'PRD-001', name: 'لابتوب HP', sku: 'LPT-HP-15', stock: 25, price: 3200 },
-    { id: 'PRD-002', name: 'ماوس لاسلكي', sku: 'ACC-MSE-W1', stock: 8, price: 89 },
-    { id: 'PRD-003', name: 'شاشة 27 بوصة', sku: 'MON-27-4K', stock: 15, price: 1450 },
-    { id: 'PRD-004', name: 'لوحة مفاتيح ميكانيكية', sku: 'KBD-MCH-AR', stock: 5, price: 420 }
+    { id: 'PRD-001', name: 'لابتوب HP', sku: 'LPT-HP-15', stock: 500, price: 3200 },
+    { id: 'PRD-002', name: 'ماوس لاسلكي', sku: 'ACC-MSE-W1', stock: 500, price: 89 },
+    { id: 'PRD-003', name: 'شاشة 27 بوصة', sku: 'MON-27-4K', stock: 500, price: 1450 },
+    { id: 'PRD-004', name: 'لوحة مفاتيح ميكانيكية', sku: 'KBD-MCH-AR', stock: 500, price: 420 }
   ].forEach(function (p) { productRepo.save(p); });
 
   const createOrder = c.getCreateOrderUseCase();
